@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.vite/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/.env.example
+
+# Scratch folders (workspace convention)
+_plans/
+_docs/
+_runbooks/
+_tmp/
