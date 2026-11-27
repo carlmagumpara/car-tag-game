@@ -11,6 +11,7 @@ export function useMultiplayer({
   serverUrl,
   socketPath = '/socket.io',
   transports = DEFAULT_TRANSPORTS,
+  roomId = null,
   enabled = true,
 }) {
   const playersRef = useRef(new Map())
@@ -19,6 +20,7 @@ export function useMultiplayer({
 
   const [status, setStatus] = useState('connecting')
   const [error, setError] = useState(null)
+  const [activeRoomId, setActiveRoomId] = useState(roomId)
   const [self, setSelf] = useState(null)
   const [roster, setRoster] = useState([])
   const [playerCount, setPlayerCount] = useState(0)
@@ -29,6 +31,7 @@ export function useMultiplayer({
   useEffect(() => {
     if (!enabled || !serverUrl) {
       setStatus('offline')
+      setActiveRoomId(roomId)
       setSelf(null)
       setTagEvent(null)
       setGame(null)
@@ -43,12 +46,17 @@ export function useMultiplayer({
     setPlayerCount(0)
     setTagEvent(null)
     setGame(null)
+    setActiveRoomId(roomId)
     selfIdRef.current = null
     playersRef.current.clear()
 
     const socket = io(serverUrl, {
       path: socketPath,
       transports,
+      // The server places this socket in the requested room before it sends
+      // game:init. auth is used by the browser; query also works for raw clients.
+      auth: roomId ? { roomId } : undefined,
+      query: roomId ? { room: roomId } : undefined,
       reconnection: true,
       reconnectionDelay: 800,
       reconnectionDelayMax: 5000,
@@ -65,6 +73,7 @@ export function useMultiplayer({
 
     const onInit = (data) => {
       if (disposed || !data?.player) return
+      if (data.roomId) setActiveRoomId(data.roomId)
       selfIdRef.current = data.player.id
       setSelf(data.player)
       const others = Array.isArray(data.players) ? data.players : []
@@ -207,7 +216,7 @@ export function useMultiplayer({
       selfIdRef.current = null
       playersRef.current.clear()
     }
-  }, [serverUrl, socketPath, transports, enabled, attempt])
+  }, [serverUrl, socketPath, transports, roomId, enabled, attempt])
 
   const sendMove = useCallback((state) => {
     const socket = socketRef.current
@@ -242,5 +251,18 @@ export function useMultiplayer({
     return () => clearTimeout(timer)
   }, [tagEvent])
 
-  return { status, error, self, roster, playerCount, playersRef, sendMove, reconnect, tagEvent, game, sendReady }
+  return {
+    status,
+    error,
+    self,
+    roster,
+    playerCount,
+    playersRef,
+    sendMove,
+    reconnect,
+    tagEvent,
+    game,
+    sendReady,
+    roomId: activeRoomId,
+  }
 }

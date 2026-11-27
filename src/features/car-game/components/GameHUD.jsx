@@ -23,6 +23,9 @@ export default function GameHUD({
   tags,
   game,
   ready,
+  roomId,
+  copied,
+  onCopyLink,
   onToggleReady,
   onTogglePause,
   onExit,
@@ -60,6 +63,24 @@ export default function GameHUD({
             {drifting ? 'DRIFTING' : `${position.x}, ${position.y}`}
           </div>
         </div>
+      </div>
+
+      <div className="pointer-events-auto flex items-center justify-between gap-3 rounded-lg border border-violet-400/25 bg-slate-950/75 px-3 py-1.5 font-mono text-[11px] backdrop-blur-md">
+        <span className="text-slate-400">
+          ROOM <span className="font-bold tracking-[0.2em] text-violet-200">{roomId || '······'}</span>
+        </span>
+        <button
+          type="button"
+          onClick={onCopyLink}
+          disabled={!roomId}
+          className={`rounded-md border px-2.5 py-1 font-mono text-[10px] font-bold tracking-wide transition disabled:opacity-40 ${
+            copied
+              ? 'border-emerald-400/50 bg-emerald-500/20 text-emerald-200'
+              : 'border-violet-400/40 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25'
+          }`}
+        >
+          {copied ? 'COPIED ✓' : 'COPY LINK'}
+        </button>
       </div>
 
       <div
