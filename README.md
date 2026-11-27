@@ -2,7 +2,8 @@
 
 A standalone React + Vite + Tailwind CSS frontend and a separate Node.js/Express/Socket.IO
 server that lets visitors drive around the same stylized top-down city in real time and play
-**tag**: one driver is "it" and passes the role on by bumping into another car.
+**tag**: one driver is "it" and passes the role on by bumping into another car. Drivers ready up
+for a 30-second round (two drivers minimum); the one with the most tags when time runs out wins.
 
 - **Frontend:** React 19, Vite 8, Tailwind CSS 3, HTML Canvas, Socket.IO Client. JavaScript/JSX only.
 - **Backend:** Express 5, Socket.IO 4, in-memory player state.
@@ -30,6 +31,10 @@ Browser C (Canvas + React UI) ─┘                └── 20 Hz broadcast to
 - Tag state is **server-owned**: during the same 20 Hz tick the server checks whether the
   current tagger is within contact range of another car, transfers "it", tracks tag counts and
   emits `tag:hit`. Clients cannot claim a tag themselves.
+- Round state is **server-owned** too: `player:ready` flags start the countdown only when at
+  least two drivers are connected and every driver is ready. Scores reset at the start of each
+  round and tags only count while the timer is running; `game:state` broadcasts the phase,
+  seconds left, ready drivers and the final standings.
 - The city is generated from a **fixed seed** (`game/world.js`), so every client and the
   server calculate the same roads, buildings and spawn points without sending map data.
 - React state is used only for UI (connection status, roster, HUD text). The animation loop
@@ -62,7 +67,8 @@ vercel.json                            Vercel Vite build + Function duration con
 server/
   src/index.js                         standalone entry (calls listen())
   src/create-game-server.js            shared server factory, no listen() — used by both entries
-  src/config.js                        env parsing (port, CORS, player cap, tag tuning)
+  src/config.js                        env parsing (port, CORS, player cap, tag, round tuning)
+  src/round.js                         pure round rules (ready, timer, winner, scoring window)
   src/tag.js                           pure tag rules (contact, cooldown, reassignment)
   src/validation.js                    movement validation + rate limiter (pure)
   src/players.js                       generated names/colors, spawn slots, store
@@ -154,6 +160,7 @@ Backend (`server/.env`):
 | `MAX_PLAYERS` | `40` | Concurrent player cap (clamped to 2–200). |
 | `TAG_RADIUS` | `38` | Contact distance in world pixels for a valid tag (clamped to 20–80). |
 | `TAG_COOLDOWN_MS` | `1200` | Grace period after a tag before another tag can occur. |
+| `ROUND_SECONDS` | `30` | Length of a scoring round in seconds (clamped to 5–3600). |
 
 `.env.example` files in both folders list every variable with placeholders. `.env*` files
 are gitignored except the examples.
@@ -166,8 +173,10 @@ All events use JSON payloads. The server assigns the player ID; clients never ch
 
 | Event | Direction | Payload | Notes |
 | --- | --- | --- | --- |
-| `game:init` | server → client | `{ id, player: Player, players: Player[], config: { maxPlayers, tickMs, world, tag } }` | Sent immediately after connect. `players` excludes the new player; `tag` is `{ radius, cooldownMs }`. |
+| `game:init` | server → client | `{ id, player: Player, players: Player[], config: { maxPlayers, tickMs, world, tag, roundSeconds, minPlayers } }` | Sent immediately after connect. `players` excludes the new player; `tag` is `{ radius, cooldownMs }`. |
 | `player:joined` | server → others | `Player` | A new car entered the city. |
+| `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; `false` cancels readiness. Ignored while the timer is running. |
+| `game:state` | server → room | `{ phase, roundSeconds, secondsLeft, endsAt, minPlayers, readyIds, winnerIds, standings }` | Sent on phase transitions/joins/readiness/leaves and once per countdown second. |
 | `player:move` | client → server | `{ x: number, y: number, angle: number, speed: number }` | At most 20 Hz; validated, clamped and rate limited. |
 | `player:moved` | server → room | `{ players: Player[] }` | One 20 Hz broadcast per room, not one per client message. |
 | `player:left` | server → all | `{ id: string }` | Sent on disconnect. |
@@ -186,14 +195,20 @@ All events use JSON payloads. The server assigns the player ID; clients never ch
   "angle": 0,
   "speed": 0,
   "isIt": false,
-  "tags": 2
+  "tags": 2,
+  "ready": false
 }
 ```
 
 - `angle` is normalized to `[-π, π]`; `speed` is signed forward velocity in px/s.
-- `isIt` marks the current tagger; `tags` counts successful tags. Both are server-owned.
+- `isIt` marks the current tagger; `tags` counts successful tags; `ready` is the driver's
+  readiness for the next round. All three are server-owned.
+- `phase` is `waiting`, `playing` or `finished`; `secondsLeft` is a whole number of seconds and
+  `standings` is `[{ id, name, tags }]` sorted best-first. Ties are listed in `winnerIds`; a
+  round with zero tags has no winners.
 - The first driver becomes "it" automatically. If the tagger leaves, "it" passes to another
-  driver; a 1.2 s cooldown (configurable) prevents instant tag-backs.
+  driver; a 1.2 s cooldown (configurable) prevents instant tag-backs. Each new round resets
+  scores and reassigns "it".
 - Movement packets over ~25/s or faster than 40 ms apart are dropped per socket.
 - Five malformed packets (not rate-limited drops) disconnect that socket.
 - A full city emits `game:error` with `SERVER_FULL` and closes the connection.
@@ -215,6 +230,13 @@ All events use JSON payloads. The server assigns the player ID; clients never ch
 tag them — the role and a "Tagged!" flash transfer to them. The HUD shows who is "it" and how
 many tags you have; the driver list marks the tagger with `IT`. Contact is resolved on the
 server, so bumping is enough — there is no separate tag button.
+
+**Round rules:** press `READY` in the HUD (or `Ready for next round` on the winner screen) to
+indicate you want to play. The 30-second timer starts only when there are at least two drivers
+and **every** connected driver is ready. Tags scored before the timer starts do not count. When
+time runs out the driver with the most tags wins; ties share the win, and a scoreless round has
+no winner. Press ready again to start another round. If the room drops below two drivers while a
+round is running, the round is aborted and scores are cleared.
 
 Game keys are only intercepted while the game is active; the landing page and normal
 portfolio navigation are unaffected. Touch buttons use pointer capture and release on
@@ -242,7 +264,7 @@ function in the same project as the static site. `vercel.json` selects the Vite 
    | `VITE_GAME_TRANSPORTS` | `websocket` | Vercel only upgrades WebSockets, not long-polling |
    | `VITE_GAME_SERVER_URL` | *(empty)* | Empty = same deployment origin; or set `https://<project>.vercel.app` |
    | `CLIENT_ORIGINS` | `https://<project>.vercel.app` | Server-side CORS allowlist; add custom domains too |
-   | `MAX_PLAYERS`, `TAG_RADIUS`, `TAG_COOLDOWN_MS` | *(optional)* | Same tuning as standalone |
+   | `MAX_PLAYERS`, `TAG_RADIUS`, `TAG_COOLDOWN_MS`, `ROUND_SECONDS` | *(optional)* | Same tuning as standalone |
 
    `VITE_*` values are public build-time settings; `CLIENT_ORIGINS` is server-only.
 4. Deploy. Open `https://<project>.vercel.app/#/game` in two windows to test.
@@ -307,7 +329,7 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 Automated (all executed during implementation):
 
 ```bash
-npm run test:all           # 20 frontend + 12 server tests (incl. tag rules) — all passed
+npm run test:all           # 20 frontend + 21 server tests (incl. tag and round rules) — all passed
 npm run build              # production build — passed
 npm run server             # then: curl http://localhost:3001/health
 node _tmp/integration-check.mjs    # two Socket.IO clients: init/join/move/leave/error/reconnect
@@ -328,8 +350,10 @@ Manual test checklist:
 3. Drive to a world edge and into a building; confirm the car is blocked.
 4. Drive the tagged car into the other one; confirm "it", the flash and the tag count transfer.
 5. Close one window; the other should show the player leaving (and "it" reassigned if needed).
-6. Stop and restart the server; both clients should show "Connection lost", then reconnect.
-7. Resize the window and test on a phone-sized viewport for touch controls.
+6. Click `READY` on one client: the timer stays paused. Click `READY` on the other: the 30-second
+   countdown begins and scores reset. Check the winner screen when time runs out.
+7. Stop and restart the server; both clients should show "Connection lost", then reconnect.
+8. Resize the window and test on a phone-sized viewport for touch controls.
 
 ---
 
@@ -372,8 +396,8 @@ Manual test checklist:
 - Because physics is client-side, a modified client can still get close enough to tag
   unfairly; authoritative physics would close that gap.
 - In-memory state means a server restart clears the city, tags and all players.
-- Single room only; no private games, chat or persistent scoreboards (tag counts reset on
-  disconnect).
+- Single room only; no private games, chat or persistent scoreboards (tag counts reset each
+  round and on disconnect).
 - Spawn slots repeat after 12 concurrent players.
 - Future work: server-authoritative physics with input messages, proper collision-based tags,
   multiple rooms, persistent profiles and scoreboards, and an authoritative drift flag.

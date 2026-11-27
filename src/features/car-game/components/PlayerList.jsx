@@ -16,6 +16,11 @@ export default function PlayerList({ players, selfId }) {
             />
             <span className="truncate font-mono text-[11px] text-slate-300">{player.name}</span>
             {player.isIt && <span className="font-mono text-[9px] font-bold text-orange-300">IT</span>}
+            {player.ready && (
+              <span className="font-mono text-[9px] font-bold text-emerald-300" title="Ready to start">
+                RDY
+              </span>
+            )}
             {player.id === selfId && (
               <span className="ml-auto font-mono text-[9px] text-cyan-300">YOU</span>
             )}

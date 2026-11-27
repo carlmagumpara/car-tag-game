@@ -50,13 +50,20 @@ export default function CarGame({ onExit }) {
   const [paused, setPaused] = useState(false)
   const [hud, setHud] = useState({ speed: 0, drifting: false, x: 0, y: 0 })
 
-  const { status, error, self, roster, playerCount, playersRef, sendMove, reconnect, tagEvent } =
+  const { status, error, self, roster, playerCount, playersRef, sendMove, reconnect, tagEvent, game, sendReady } =
     useMultiplayer({ ...socketConfig, enabled: true })
 
   const isIt = Boolean(self?.isIt)
   const itName = roster.find((player) => player.isIt)?.name || 'Nobody'
   const tags = self?.tags || 0
-  const controlsEnabled = Boolean(self) && status === 'connected' && !paused
+  const phase = game?.phase || 'waiting'
+  const roundActive = phase === 'playing'
+  const roundOver = phase === 'finished'
+  const ready = Boolean(self?.ready)
+  const winnerIds = game?.winnerIds || []
+  const winners = (game?.standings || []).filter((entry) => winnerIds.includes(entry.id))
+  const winnerNames = winners.map((entry) => entry.name).join(' & ')
+  const controlsEnabled = Boolean(self) && status === 'connected' && !paused && !roundOver
   const { inputRef, clear } = useKeyboard({ enabled: controlsEnabled })
 
   const handleHudUpdate = useCallback((next) => setHud(next), [])
@@ -94,7 +101,7 @@ export default function CarGame({ onExit }) {
           self={self}
           sendMove={sendMove}
           onHudUpdate={handleHudUpdate}
-          paused={paused || needsConnectionOverlay}
+          paused={paused || needsConnectionOverlay || roundOver}
           tagEvent={tagEvent}
         />
 
@@ -108,6 +115,9 @@ export default function CarGame({ onExit }) {
           isIt={isIt}
           itName={itName}
           tags={tags}
+          game={game}
+          ready={ready}
+          onToggleReady={() => sendReady(!ready)}
           onTogglePause={() => setPaused((value) => !value)}
           onExit={onExit}
         />
@@ -116,8 +126,20 @@ export default function CarGame({ onExit }) {
           <>
             <PlayerList players={roster} selfId={self?.id} />
             <GameControls />
-            <TouchControls onPress={handleTouch} enabled={!paused} />
+            <TouchControls onPress={handleTouch} enabled={!paused && !roundOver} />
           </>
+        )}
+
+        {roundActive && !needsConnectionOverlay && (
+          <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-xl border border-violet-400/30 bg-slate-950/80 px-4 py-2 text-center font-mono shadow-lg shadow-black/30 backdrop-blur-md">
+            <div className="font-mono text-[10px] font-semibold uppercase tracking-widest text-violet-300">
+              Round in progress
+            </div>
+            <div className="mt-0.5 text-2xl font-bold leading-none text-white tabular-nums">
+              {String(Math.floor(Math.max(0, game?.secondsLeft ?? 0) / 60)).padStart(2, '0')}:
+              {String(Math.max(0, game?.secondsLeft ?? 0) % 60).padStart(2, '0')}
+            </div>
+          </div>
         )}
 
         {error && status === 'connected' && (
@@ -140,7 +162,23 @@ export default function CarGame({ onExit }) {
           </div>
         )}
 
-        {paused && !needsConnectionOverlay && (
+        {roundOver && !needsConnectionOverlay && (
+          <Overlay
+            icon="🏆"
+            title={winnerNames ? `${winnerNames} ${winnerIds.length > 1 ? 'win' : 'wins'}!` : 'Round over'}
+            message={
+              winnerNames
+                ? `Most tags this round: ${winners[0]?.tags || 0}.${ready ? ' Waiting for the other drivers to ready up.' : ' Ready up for another round.'}`
+                : 'Nobody tagged anyone this round. Ready up to try again.'
+            }
+            actionLabel={ready ? 'Cancel ready' : 'Ready for next round'}
+            onAction={() => sendReady(!ready)}
+            secondaryLabel="Exit to home"
+            onSecondary={onExit}
+          />
+        )}
+
+        {paused && !roundOver && !needsConnectionOverlay && (
           <Overlay
             title="Paused"
             message="Your controls are released. The city will be here when you get back."

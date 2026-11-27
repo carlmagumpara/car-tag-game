@@ -33,6 +33,7 @@ export function publicPlayer(player) {
     speed: player.speed,
     isIt: player.isIt,
     tags: player.tags,
+    ready: Boolean(player.ready),
   }
 }
 
@@ -62,6 +63,7 @@ export class PlayerStore {
       speed: 0,
       isIt: false,
       tags: 0,
+      ready: false,
     }
     this.players.set(id, player)
     return player

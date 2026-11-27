@@ -23,6 +23,7 @@ export function useMultiplayer({
   const [roster, setRoster] = useState([])
   const [playerCount, setPlayerCount] = useState(0)
   const [tagEvent, setTagEvent] = useState(null)
+  const [game, setGame] = useState(null)
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
@@ -30,6 +31,7 @@ export function useMultiplayer({
       setStatus('offline')
       setSelf(null)
       setTagEvent(null)
+      setGame(null)
       return undefined
     }
 
@@ -40,6 +42,7 @@ export function useMultiplayer({
     setRoster([])
     setPlayerCount(0)
     setTagEvent(null)
+    setGame(null)
     selfIdRef.current = null
     playersRef.current.clear()
 
@@ -134,6 +137,26 @@ export function useMultiplayer({
       }
     }
 
+    const onGameState = (payload) => {
+      if (disposed || !payload?.phase) return
+      setGame(payload)
+      const readyIds = new Set(Array.isArray(payload.readyIds) ? payload.readyIds : [])
+      setSelf((current) => {
+        const ready = readyIds.has(current?.id)
+        return current && current.ready !== ready ? { ...current, ready } : current
+      })
+      setRoster((previous) => {
+        let changed = false
+        const next = previous.map((player) => {
+          const ready = readyIds.has(player.id)
+          if (Boolean(player.ready) === ready) return player
+          changed = true
+          return { ...player, ready }
+        })
+        return changed ? next : previous
+      })
+    }
+
     const onDisconnect = (reason) => {
       if (disposed) return
       setStatus(reason === 'io client disconnect' ? 'offline' : 'reconnecting')
@@ -141,6 +164,7 @@ export function useMultiplayer({
       setRoster([])
       setPlayerCount(0)
       setTagEvent(null)
+      setGame(null)
       selfIdRef.current = null
       playersRef.current.clear()
     }
@@ -169,6 +193,7 @@ export function useMultiplayer({
     socket.on('player:moved', onMoved)
     socket.on('player:left', onLeft)
     socket.on('tag:hit', onTagHit)
+    socket.on('game:state', onGameState)
     socket.on('game:error', onGameError)
     socket.on('disconnect', onDisconnect)
     socket.on('connect_error', onConnectError)
@@ -195,6 +220,12 @@ export function useMultiplayer({
     })
   }, [])
 
+  const sendReady = useCallback((ready = true) => {
+    const socket = socketRef.current
+    if (!socket?.connected) return
+    socket.emit('player:ready', { ready })
+  }, [])
+
   const reconnect = useCallback(() => {
     const socket = socketRef.current
     if (socket) {
@@ -211,5 +242,5 @@ export function useMultiplayer({
     return () => clearTimeout(timer)
   }, [tagEvent])
 
-  return { status, error, self, roster, playerCount, playersRef, sendMove, reconnect, tagEvent }
+  return { status, error, self, roster, playerCount, playersRef, sendMove, reconnect, tagEvent, game, sendReady }
 }

@@ -1,3 +1,8 @@
+function formatTime(seconds) {
+  const total = Math.max(0, Math.floor(seconds || 0))
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
 const STATUS_STYLES = {
   connecting: { label: 'Connecting', dot: 'bg-amber-400', text: 'text-amber-300', pulse: true },
   connected: { label: 'Online', dot: 'bg-emerald-400', text: 'text-emerald-300', pulse: false },
@@ -16,10 +21,18 @@ export default function GameHUD({
   isIt,
   itName,
   tags,
+  game,
+  ready,
+  onToggleReady,
   onTogglePause,
   onExit,
 }) {
   const connection = STATUS_STYLES[status] || STATUS_STYLES.offline
+  const phase = game?.phase || 'waiting'
+  const playing = phase === 'playing'
+  const secondsLeft = game?.secondsLeft ?? game?.roundSeconds ?? 30
+  const readyCount = game?.readyIds?.length || 0
+  const minPlayers = game?.minPlayers || 2
 
   return (
     <div className="pointer-events-none absolute left-3 top-3 z-20 flex flex-col gap-2 sm:left-4 sm:top-4">
@@ -60,6 +73,37 @@ export default function GameHUD({
           {isIt ? "YOU'RE IT — tag someone!" : `${itName || 'Nobody'} is it — stay away`}
         </span>
         <span className="text-slate-400">tags {tags}</span>
+      </div>
+
+      <div
+        className={`pointer-events-auto flex items-center justify-between gap-3 rounded-lg border px-3 py-1.5 font-mono text-[11px] backdrop-blur-md ${
+          playing
+            ? 'border-violet-400/30 bg-violet-950/60 text-violet-200'
+            : 'border-white/10 bg-slate-950/75 text-slate-300'
+        }`}
+      >
+        <span className="font-semibold">
+          {playing
+            ? `Round · ${formatTime(secondsLeft)} left`
+            : phase === 'finished'
+              ? 'Round over — ready up again'
+              : playerCount < minPlayers
+                ? `Need ${minPlayers} drivers to start`
+                : `Ready ${readyCount}/${playerCount}`}
+        </span>
+        {!playing && (
+          <button
+            type="button"
+            onClick={onToggleReady}
+            className={`rounded-md border px-2.5 py-1 font-mono text-[10px] font-bold tracking-wide transition ${
+              ready
+                ? 'border-emerald-400/50 bg-emerald-500/20 text-emerald-200'
+                : 'border-cyan-400/50 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30'
+            }`}
+          >
+            {ready ? 'READY ✓' : 'READY'}
+          </button>
+        )}
       </div>
 
       <div className="pointer-events-auto flex gap-2">
