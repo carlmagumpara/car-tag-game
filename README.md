@@ -238,7 +238,7 @@ function in the same project as the static site. `vercel.json` selects the Vite 
 
    | Variable | Example | Purpose |
    | --- | --- | --- |
-   | `VITE_GAME_SOCKET_PATH` | `/api/game/socket.io` | Socket.IO path of the function route |
+   | `VITE_GAME_SOCKET_PATH` | `/api/game` | Socket.IO path of the exact function route |
    | `VITE_GAME_TRANSPORTS` | `websocket` | Vercel only upgrades WebSockets, not long-polling |
    | `VITE_GAME_SERVER_URL` | *(empty)* | Empty = same deployment origin; or set `https://<project>.vercel.app` |
    | `CLIENT_ORIGINS` | `https://<project>.vercel.app` | Server-side CORS allowlist; add custom domains too |
@@ -246,7 +246,9 @@ function in the same project as the static site. `vercel.json` selects the Vite 
 
    `VITE_*` values are public build-time settings; `CLIENT_ORIGINS` is server-only.
 4. Deploy. Open `https://<project>.vercel.app/#/game` in two windows to test.
-   Health check: `GET https://<project>.vercel.app/api/game/health`.
+   Health check: `GET https://<project>.vercel.app/api/game` (the function is served at that
+   exact path; `/api/game/*` subpaths are not routed to it, so the Socket.IO path is `/api/game`
+   itself).
 
 Important Vercel-specific behavior:
 
@@ -293,8 +295,8 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 | Players never see each other | Both clients must use the same server URL; check `/health` and browser console. |
 | Assets 404 on Pages | `VITE_BASE_PATH` should be `./` for a project site, `/` for a custom-domain root. |
 | Build fails in Actions | Repository variable `VITE_GAME_SERVER_URL` must be set. |
-| Vercel game won't connect | `VITE_GAME_SOCKET_PATH=/api/game/socket.io`, `VITE_GAME_TRANSPORTS=websocket`, and Fluid Compute enabled. |
-| Vercel health 404 | Function is at `/api/game`; check `vercel.json` and the deployment's Functions tab. |
+| Vercel game won't connect | `VITE_GAME_SOCKET_PATH=/api/game` (exact path), `VITE_GAME_TRANSPORTS=websocket`, and Fluid Compute enabled. |
+| Vercel health 404 | Use `GET /api/game`; `/api/game/health` is not routed to the function. Check the Functions tab if `/api/game` 404s. |
 | Players split into separate lobbies | Different function instances hold separate in-memory state; add Redis/pub-sub for scale. |
 | Server restarts / players drop | Expected: state is in memory; clients reconnect automatically and respawn. |
 

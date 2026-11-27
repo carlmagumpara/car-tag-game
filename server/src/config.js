@@ -14,6 +14,9 @@ export const config = Object.freeze({
   clientOrigins: origins,
   maxPlayers: Math.min(Math.max(Number(process.env.MAX_PLAYERS) || 40, 2), 200),
   tickMs: 50, // 20Hz state broadcast; clients send at most 20Hz each.
+  // Vercel Functions receive the full /api/game path, so the function entry
+  // overrides this with '/api/game'. Standalone servers use the default.
+  socketPath: process.env.SOCKET_IO_PATH || '/socket.io',
   tagRadius: Math.min(Math.max(Number(process.env.TAG_RADIUS) || 38, 20), 80),
   tagCooldownMs: Math.min(Math.max(Number(process.env.TAG_COOLDOWN_MS) || 1200, 200), 10000),
 })

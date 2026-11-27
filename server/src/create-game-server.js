@@ -17,7 +17,7 @@ const ROOM = 'city'
 
 // Builds the game server without calling listen(), so the same code can run as
 // a standalone Node process or as the default export of a Vercel Function.
-export function createGameServer() {
+export function createGameServer({ socketPath = config.socketPath, healthPath = '/health' } = {}) {
   const store = new PlayerStore(config.maxPlayers)
   const tagState = createTagState()
   const limiters = new Map()
@@ -30,7 +30,7 @@ export function createGameServer() {
   const app = express()
   app.disable('x-powered-by')
 
-  app.get('/health', (_request, response) => {
+  app.get(healthPath, (_request, response) => {
     response.status(200).json({
       status: 'ok',
       players: store.size,
@@ -45,6 +45,7 @@ export function createGameServer() {
 
   const httpServer = createServer(app)
   const io = new Server(httpServer, {
+    path: socketPath,
     cors: {
       origin: config.clientOrigins,
       methods: ['GET', 'POST'],

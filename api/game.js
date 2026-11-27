@@ -1,9 +1,9 @@
 import { createGameServer } from '../server/src/create-game-server.js'
 
-// Vercel Functions serve WebSockets by exporting a Node http.Server.
-// The Socket.IO endpoint is reached at /api/game/socket.io/... on the
-// deployment domain; configure the client with that path and transports:
-// ['websocket']. See README.md for the full setup.
-const { httpServer } = createGameServer()
+// Vercel Functions are routed at the exact path /api/game and receive that
+// full path in req.url (subpaths like /api/game/health are not routed to the
+// function). Socket.IO therefore listens on /api/game itself, and the plain
+// GET /api/game request doubles as the health check.
+const { httpServer } = createGameServer({ socketPath: '/api/game', healthPath: '/api/game' })
 
 export default httpServer
