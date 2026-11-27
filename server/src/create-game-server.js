@@ -2,7 +2,7 @@ import express from 'express'
 import { createServer } from 'node:http'
 import { Server } from 'socket.io'
 import { config } from './config.js'
-import { publicPlayer } from './players.js'
+import { normalizeCarColor, publicPlayer } from './players.js'
 import { RoomManager, normalizeRoomId } from './rooms.js'
 import {
   MIN_PLAYERS,
@@ -131,9 +131,15 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       return
     }
 
+    // A driver may pick a car color on the landing page. Anything else gets a
+    // distinct default color from the room's spawn index.
+    const requestedColor = normalizeCarColor(
+      socket.handshake.auth?.carColor ?? socket.handshake.query?.carColor,
+      null,
+    )
     const previousPhase = room.round.phase
     const now = Date.now()
-    const player = room.store.add(socket.id)
+    const player = room.store.add(socket.id, requestedColor)
     room.limiters.set(socket.id, createRateLimiter())
     room.violations.set(socket.id, 0)
     socket.join(room.id)

@@ -59,6 +59,7 @@ src/
   features/car-game/
     CarGame.jsx                        composition, overlays, pause/exit, copy room link
     game/room-id.js                     six-character code generation/normalization
+    game/car-colors.js                  selectable car palette, normalization, localStorage
     GameCanvas.jsx                     rAF loop, camera, DPR canvas, effects
     components/GameHUD.jsx             speed, status, online count, pause/exit
     components/PlayerList.jsx          roster with color swatches
@@ -84,7 +85,7 @@ server/
   src/round.js                         pure round rules (ready, timer, winner, scoring window)
   src/tag.js                           pure tag rules (contact, cooldown, reassignment)
   src/validation.js                    movement validation + rate limiter (pure)
-  src/players.js                       generated names/colors, spawn slots, store
+  src/players.js                       car palette, generated names, spawn slots, store
   Dockerfile                           standalone container
 tests/, server/test/                   node:test suites
 _tmp/                                  scratch verification scripts (gitignored)
@@ -101,6 +102,10 @@ _tmp/                                  scratch verification scripts (gitignored)
 - The server duplicates its world-limit constants instead of importing browser code, so it
   can be deployed as an isolated service. Keep `server/src/validation.js` in sync with
   `src/features/car-game/game/constants.js`.
+- Car colors follow the same rule: `src/features/car-game/game/car-colors.js` and
+  `server/src/players.js` each hold the palette. The chosen color travels in the Socket.IO
+  handshake (`carColor` in `auth`/`query`) and the server validates it before assigning it;
+  anything invalid falls back to the room's distinct default color.
 - The dusk city is drawn once into an offscreen canvas at startup (textured asphalt,
   crosswalks, sidewalks, lit windows, roof equipment, parks, streetlights and parked cars)
   and blitted each frame; only cars, lights, skids and particles redraw dynamically.
@@ -254,6 +259,11 @@ the six-character code, creates the room if needed, joins the socket and only th
 the code or use **Copy link** in the HUD; anyone opening that link joins the same game. Enter a
 code in the landing page's "Have a code?" field to join an existing room. Drivers in other rooms
 are invisible and have separate tags and rounds.
+
+**Car color:** pick a swatch under **Pick your car color** on the landing page before creating or
+joining a room. The choice is sent with the connection, so everyone in the room sees your car in
+that color, and it is saved in the browser for next time. Without a valid choice the server gives
+each driver a different default color.
 
 **Tag rules:** the driver with the flaming orange outline is "it". Drive into another car to
 tag them — the role and a "Tagged!" flash transfer to them. The HUD shows who is "it" and how

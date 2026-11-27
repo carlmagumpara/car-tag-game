@@ -47,7 +47,7 @@ function Spinner() {
   )
 }
 
-export default function CarGame({ onExit, roomId }) {
+export default function CarGame({ onExit, roomId, carColor }) {
   const [paused, setPaused] = useState(false)
   const [hud, setHud] = useState({ speed: 0, drifting: false, x: 0, y: 0 })
   const [copied, setCopied] = useState(false)
@@ -65,7 +65,7 @@ export default function CarGame({ onExit, roomId }) {
     game,
     sendReady,
     roomId: activeRoomId,
-  } = useMultiplayer({ ...socketConfig, roomId, enabled: true })
+  } = useMultiplayer({ ...socketConfig, roomId, carColor, enabled: true })
 
   // Usually the same as the URL code; the server's value wins if a raw client
   // connected without one, so the copied link always points to the real room.

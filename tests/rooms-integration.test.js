@@ -32,11 +32,11 @@ function once(socket, event, timeoutMs = 3000) {
   })
 }
 
-function connect(roomId) {
+function connect(roomId, extraAuth = {}) {
   const socket = io(`http://127.0.0.1:${port}`, {
     transports: ['websocket'],
     reconnection: false,
-    auth: { roomId },
+    auth: { roomId, ...extraAuth },
   })
   sockets.push(socket)
   return socket
@@ -92,6 +92,18 @@ test('a missing or malformed code gets a fresh generated room', async () => {
   const init = await once(socket, 'game:init')
   assert.match(init.roomId, ROOM_ID_PATTERN)
   assert.deepEqual(init.players, [])
+})
+
+test('a chosen car color is assigned and shared with the rest of the room', async () => {
+  const a = connect('KART23', { carColor: '#F97316' })
+  const initA = await once(a, 'game:init')
+  assert.equal(initA.player.color, '#f97316')
+
+  const b = connect('KART23', { carColor: 'not-a-color' })
+  const initB = await once(b, 'game:init')
+  assert.equal(initB.players[0].color, '#f97316')
+  assert.match(initB.player.color, /^#[0-9a-f]{6}$/)
+  assert.notEqual(initB.player.color, '#f97316')
 })
 
 test('health reports active rooms and total players', async () => {

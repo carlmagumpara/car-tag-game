@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import CarGame from './features/car-game/CarGame.jsx'
+import { CAR_COLORS, loadCarColor, saveCarColor } from './features/car-game/game/car-colors.js'
 import { createRoomId, normalizeRoomId } from './features/car-game/game/room-id.js'
 
 function parseRoute() {
@@ -10,7 +11,54 @@ function parseRoute() {
   return { view: 'landing', roomId: null }
 }
 
-function Landing({ onPlay, onJoin }) {
+function ColorPicker({ color, onSelect }) {
+  const selected = CAR_COLORS.find((entry) => entry.hex === color) || CAR_COLORS[0]
+
+  return (
+    <section className="mt-10 max-w-xl" aria-label="Car color">
+      <h2 className="font-mono text-xs uppercase tracking-[0.25em] text-slate-500">
+        Pick your car color
+      </h2>
+      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-3">
+        <div className="flex flex-wrap gap-2">
+          {CAR_COLORS.map((entry) => {
+            const active = entry.hex === selected.hex
+            return (
+              <button
+                key={entry.id}
+                type="button"
+                title={entry.name}
+                aria-label={`${entry.name} car`}
+                aria-pressed={active}
+                onClick={() => onSelect(entry.hex)}
+                className={`h-8 w-8 rounded-full border-2 transition hover:scale-110 ${
+                  active
+                    ? 'scale-110 border-white ring-2 ring-cyan-400/60 ring-offset-2 ring-offset-slate-950'
+                    : 'border-white/20 hover:border-white/60'
+                }`}
+                style={{ backgroundColor: entry.hex }}
+              />
+            )
+          })}
+        </div>
+        <div className="flex items-center gap-3">
+          <div
+            className="relative h-7 w-12 shrink-0 rounded-[10px] shadow-lg"
+            style={{ backgroundColor: selected.hex, boxShadow: `0 0 18px ${selected.hex}55` }}
+            aria-hidden="true"
+          >
+            <span className="absolute left-1/2 top-1/2 h-4 w-5 -translate-x-1/2 -translate-y-1/2 rounded-sm bg-slate-950/70" />
+          </div>
+          <span className="font-mono text-xs text-slate-400">
+            <span className="font-semibold text-white">{selected.name}</span> · saved for next time
+          </span>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function Landing({ onPlay, onJoin, carColor, onSelectColor }) {
   const [code, setCode] = useState('')
   const [invalid, setInvalid] = useState(false)
 
@@ -94,6 +142,8 @@ function Landing({ onPlay, onJoin }) {
           )}
         </form>
 
+        <ColorPicker color={carColor} onSelect={onSelectColor} />
+
         <div className="mt-16 grid gap-4 sm:grid-cols-3">
           {[
             {
@@ -129,6 +179,9 @@ function Landing({ onPlay, onJoin }) {
 
 export default function App() {
   const [route, setRoute] = useState(parseRoute)
+  const [carColor, setCarColor] = useState(loadCarColor)
+
+  const selectCarColor = useCallback((value) => setCarColor(saveCarColor(value)), [])
 
   useEffect(() => {
     const onHashChange = () => setRoute(parseRoute())
@@ -154,6 +207,7 @@ export default function App() {
       <CarGame
         key={roomId}
         roomId={roomId}
+        carColor={carColor}
         onExit={() => {
           window.location.hash = '/'
         }}
@@ -163,6 +217,8 @@ export default function App() {
 
   return (
     <Landing
+      carColor={carColor}
+      onSelectColor={selectCarColor}
       onPlay={() => {
         window.location.hash = `/game/${createRoomId()}`
       }}

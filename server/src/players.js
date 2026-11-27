@@ -1,6 +1,28 @@
 const ADJECTIVES = ['Neon', 'Swift', 'Midnight', 'Turbo', 'Cloudy', 'Electric', 'Golden', 'Quiet', 'Cosmic']
 const NOUNS = ['Driver', 'Comet', 'Falcon', 'Voyager', 'Racer', 'Panda', 'Nova', 'Cruise', 'Kite']
-const COLORS = ['#38bdf8', '#f472b6', '#a3e635', '#fbbf24', '#c084fc', '#fb7185', '#2dd4bf', '#f8fafc', '#f97316', '#818cf8']
+
+// Duplicated from src/features/car-game/game/car-colors.js so this server can be
+// deployed on its own. Keep the palette in sync.
+export const CAR_COLORS = Object.freeze([
+  { id: 'cyan', hex: '#38bdf8' },
+  { id: 'pink', hex: '#f472b6' },
+  { id: 'lime', hex: '#a3e635' },
+  { id: 'amber', hex: '#fbbf24' },
+  { id: 'violet', hex: '#c084fc' },
+  { id: 'rose', hex: '#fb7185' },
+  { id: 'teal', hex: '#2dd4bf' },
+  { id: 'white', hex: '#f8fafc' },
+  { id: 'orange', hex: '#f97316' },
+  { id: 'indigo', hex: '#818cf8' },
+])
+
+export function normalizeCarColor(value, fallback = CAR_COLORS[0].hex) {
+  if (typeof value !== 'string') return fallback
+  const trimmed = value.trim().toLowerCase()
+  const candidate = trimmed.startsWith('#') ? trimmed : `#${trimmed}`
+  const match = CAR_COLORS.find((color) => color.hex === candidate || color.id === trimmed)
+  return match ? match.hex : fallback
+}
 
 export function generatePlayerName(taken = []) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -49,14 +71,14 @@ export class PlayerStore {
     return this.players.size
   }
 
-  add(id) {
+  add(id, requestedColor = null) {
     const taken = Array.from(this.players.values(), (player) => player.name)
     const index = this.players.size
     const spawn = spawnFor(index)
     const player = {
       id,
       name: generatePlayerName(taken),
-      color: COLORS[index % COLORS.length],
+      color: normalizeCarColor(requestedColor, CAR_COLORS[index % CAR_COLORS.length].hex),
       x: spawn.x,
       y: spawn.y,
       angle: spawn.angle,

@@ -12,6 +12,7 @@ export function useMultiplayer({
   socketPath = '/socket.io',
   transports = DEFAULT_TRANSPORTS,
   roomId = null,
+  carColor = null,
   enabled = true,
 }) {
   const playersRef = useRef(new Map())
@@ -50,13 +51,23 @@ export function useMultiplayer({
     selfIdRef.current = null
     playersRef.current.clear()
 
+    // auth is used by the browser; query also works for raw clients/health checks.
+    const auth = {
+      ...(roomId ? { roomId } : {}),
+      ...(carColor ? { carColor } : {}),
+    }
+    const query = {
+      ...(roomId ? { room: roomId } : {}),
+      ...(carColor ? { carColor } : {}),
+    }
+
     const socket = io(serverUrl, {
       path: socketPath,
       transports,
-      // The server places this socket in the requested room before it sends
-      // game:init. auth is used by the browser; query also works for raw clients.
-      auth: roomId ? { roomId } : undefined,
-      query: roomId ? { room: roomId } : undefined,
+      // The server places this socket in the requested room and assigns the
+      // chosen car color before it sends game:init.
+      auth: Object.keys(auth).length ? auth : undefined,
+      query: Object.keys(query).length ? query : undefined,
       reconnection: true,
       reconnectionDelay: 800,
       reconnectionDelayMax: 5000,
@@ -216,7 +227,7 @@ export function useMultiplayer({
       selfIdRef.current = null
       playersRef.current.clear()
     }
-  }, [serverUrl, socketPath, transports, roomId, enabled, attempt])
+  }, [serverUrl, socketPath, transports, roomId, carColor, enabled, attempt])
 
   const sendMove = useCallback((state) => {
     const socket = socketRef.current
