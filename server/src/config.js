@@ -13,6 +13,9 @@ export const config = Object.freeze({
   port: Number(process.env.PORT) || 3001,
   clientOrigins: origins,
   maxPlayers: Math.min(Math.max(Number(process.env.MAX_PLAYERS) || 40, 2), 200),
+  // Cap on simultaneous rooms so a public server cannot be filled with empty
+  // lobbies. Existing rooms can always be joined, even at the cap.
+  maxRooms: Math.min(Math.max(Number(process.env.MAX_ROOMS) || 200, 1), 1000),
   tickMs: 50, // 20Hz state broadcast; clients send at most 20Hz each.
   // Vercel Functions receive the full /api/game path, so the function entry
   // overrides this with '/api/game'. Standalone servers use the default.

@@ -2,10 +2,10 @@ import express from 'express'
 import { createServer } from 'node:http'
 import { Server } from 'socket.io'
 import { config } from './config.js'
-import { PlayerStore, publicPlayer } from './players.js'
+import { publicPlayer } from './players.js'
+import { RoomManager, normalizeRoomId } from './rooms.js'
 import {
   MIN_PLAYERS,
-  createRoundState,
   handlePlayerLeft,
   isRoundActive,
   maybeFinishRound,
@@ -15,7 +15,6 @@ import {
 } from './round.js'
 import {
   applyTag,
-  createTagState,
   ensureIt,
   evaluateTag,
   publicTagState,
@@ -23,20 +22,19 @@ import {
 } from './tag.js'
 import { createRateLimiter, SERVER_BOUNDS, validateMove } from './validation.js'
 
-const ROOM = 'city'
-
 // Builds the game server without calling listen(), so the same code can run as
 // a standalone Node process or as the default export of a Vercel Function.
+// Every connected game lives in its own room; events and broadcasts are scoped
+// to that room so separate shareable links never see each other.
 export function createGameServer({ socketPath = config.socketPath, healthPath = '/health' } = {}) {
-  const store = new PlayerStore(config.maxPlayers)
-  const tagState = createTagState()
-  const round = createRoundState(config.roundSeconds)
-  const limiters = new Map()
-  const violationCounts = new Map()
-  let lastRoundSignature = ''
+  const rooms = new RoomManager({
+    maxPlayers: config.maxPlayers,
+    roundSeconds: config.roundSeconds,
+    maxRooms: config.maxRooms,
+  })
 
-  function broadcastTag(hit) {
-    io.to(ROOM).emit('tag:hit', { ...hit, players: publicTagState(store.snapshot()) })
+  function broadcastTag(room, hit) {
+    io.to(room.id).emit('tag:hit', { ...hit, players: publicTagState(room.store.snapshot()) })
   }
 
   function roundSignature(state) {
@@ -50,30 +48,30 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
 
   // Sent on transitions and once per countdown second (not on the 20 Hz tick)
   // so React's HUD does not re-render for every movement snapshot.
-  function broadcastRound(force = false) {
-    const payload = publicRoundState(round, store.snapshot(), Date.now())
+  function broadcastRound(room, force = false) {
+    const payload = publicRoundState(room.round, room.store.snapshot(), Date.now())
     const signature = roundSignature(payload)
-    if (!force && signature === lastRoundSignature) return
-    lastRoundSignature = signature
-    io.to(ROOM).emit('game:state', payload)
+    if (!force && signature === room.lastRoundSignature) return
+    room.lastRoundSignature = signature
+    io.to(room.id).emit('game:state', payload)
   }
 
-  function resetTagger(now) {
-    tagState.itId = null
-    tagState.cooldownUntil = 0
-    tagState.lastTaggerId = null
-    const reassignment = ensureIt(store.snapshot(), tagState, now, config.tagCooldownMs)
-    if (reassignment) broadcastTag(reassignment)
+  function resetTagger(room, now) {
+    room.tagState.itId = null
+    room.tagState.cooldownUntil = 0
+    room.tagState.lastTaggerId = null
+    const reassignment = ensureIt(room.store.snapshot(), room.tagState, now, config.tagCooldownMs)
+    if (reassignment) broadcastTag(room, reassignment)
   }
 
   // Call after an event that may have changed the phase (join, ready, leave,
   // tick). A fresh round gets a fresh "it" and a forced state broadcast.
-  function afterRoundChange(previousPhase, now) {
-    if (round.phase !== previousPhase) {
-      if (isRoundActive(round)) resetTagger(now)
-      broadcastRound(true)
+  function afterRoundChange(room, previousPhase, now) {
+    if (room.round.phase !== previousPhase) {
+      if (isRoundActive(room.round)) resetTagger(room, now)
+      broadcastRound(room, true)
     } else {
-      broadcastRound()
+      broadcastRound(room)
     }
   }
 
@@ -81,13 +79,14 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
   app.disable('x-powered-by')
 
   app.get(healthPath, (_request, response) => {
+    let players = 0
+    for (const room of rooms.values()) players += room.store.size
     response.status(200).json({
       status: 'ok',
-      players: store.size,
+      players,
+      rooms: rooms.size,
+      roomIds: rooms.ids(),
       uptimeSeconds: Math.round(process.uptime()),
-      itId: tagState.itId,
-      phase: round.phase,
-      secondsLeft: publicRoundState(round, store.snapshot(), Date.now()).secondsLeft,
     })
   })
 
@@ -108,26 +107,45 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
   })
 
   io.on('connection', (socket) => {
-    if (store.size >= config.maxPlayers) {
-      socket.emit('game:error', { code: 'SERVER_FULL', message: 'The city is full. Please try again shortly.' })
+    // A client asks for a room through auth (browser) or query (raw clients).
+    // An absent/invalid code creates a brand-new room with a generated id.
+    const requested = normalizeRoomId(
+      socket.handshake.auth?.roomId ?? socket.handshake.query?.room,
+    )
+    const room = requested ? rooms.getOrCreate(requested) : rooms.create()
+    if (!room) {
+      socket.emit('game:error', {
+        code: 'ROOM_UNAVAILABLE',
+        message: 'No game rooms are available right now. Please try again shortly.',
+      })
       socket.disconnect(true)
       return
     }
 
-    const previousPhase = round.phase
-    const now = Date.now()
-    const player = store.add(socket.id)
-    limiters.set(socket.id, createRateLimiter())
-    violationCounts.set(socket.id, 0)
-    socket.join(ROOM)
+    if (room.store.size >= config.maxPlayers) {
+      socket.emit('game:error', {
+        code: 'SERVER_FULL',
+        message: `Room ${room.id} is full. Ask for a new code or try again shortly.`,
+      })
+      socket.disconnect(true)
+      return
+    }
 
-    const reassignment = ensureIt(store.snapshot(), tagState, now, config.tagCooldownMs)
-    if (reassignment) broadcastTag(reassignment)
+    const previousPhase = room.round.phase
+    const now = Date.now()
+    const player = room.store.add(socket.id)
+    room.limiters.set(socket.id, createRateLimiter())
+    room.violations.set(socket.id, 0)
+    socket.join(room.id)
+
+    const reassignment = ensureIt(room.store.snapshot(), room.tagState, now, config.tagCooldownMs)
+    if (reassignment) broadcastTag(room, reassignment)
 
     socket.emit('game:init', {
       id: socket.id,
+      roomId: room.id,
       player: publicPlayer(player),
-      players: store.snapshot().filter((item) => item.id !== socket.id).map(publicPlayer),
+      players: room.store.snapshot().filter((item) => item.id !== socket.id).map(publicPlayer),
       config: {
         maxPlayers: config.maxPlayers,
         tickMs: config.tickMs,
@@ -137,74 +155,84 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
         minPlayers: MIN_PLAYERS,
       },
     })
-    socket.broadcast.emit('player:joined', publicPlayer(player))
+    socket.to(room.id).emit('player:joined', publicPlayer(player))
     // Always give the new socket the current phase, even when the signature
     // has not changed since the last broadcast (e.g. joining mid-round).
-    socket.emit('game:state', publicRoundState(round, store.snapshot(), now))
+    socket.emit('game:state', publicRoundState(room.round, room.store.snapshot(), now))
 
     // A newcomer is never ready, so this only matters when the previous
     // unready driver left and everyone remaining had already readied up.
-    maybeStartRound(store.snapshot(), round, now)
-    afterRoundChange(previousPhase, now)
+    maybeStartRound(room.store.snapshot(), room.round, now)
+    afterRoundChange(room, previousPhase, now)
 
     socket.on('player:ready', (payload) => {
-      const before = round.phase
+      const before = room.round.phase
       const ready = payload?.ready !== false
-      setPlayerReady(store.snapshot(), round, socket.id, ready, Date.now())
-      afterRoundChange(before, Date.now())
+      setPlayerReady(room.store.snapshot(), room.round, socket.id, ready, Date.now())
+      afterRoundChange(room, before, Date.now())
     })
 
     socket.on('player:move', (payload) => {
       const result = validateMove(payload, {
         now: Date.now(),
-        limiter: limiters.get(socket.id),
+        limiter: room.limiters.get(socket.id),
       })
 
       if (!result.ok) {
         // Rate-limited packets are dropped silently; malformed ones are reported.
         if (result.code === 'RATE_LIMITED') return
-        const count = (violationCounts.get(socket.id) || 0) + 1
-        violationCounts.set(socket.id, count)
+        const count = (room.violations.get(socket.id) || 0) + 1
+        room.violations.set(socket.id, count)
         socket.emit('game:error', { code: result.code, message: result.message })
         if (count >= 5) socket.disconnect(true)
         return
       }
 
-      violationCounts.set(socket.id, 0)
-      store.update(socket.id, result.state)
+      room.violations.set(socket.id, 0)
+      room.store.update(socket.id, result.state)
     })
 
     socket.on('disconnect', () => {
-      const before = round.phase
+      const before = room.round.phase
       const now = Date.now()
-      const players = store.snapshot()
-      const reassignment = removePlayer(players, tagState, socket.id, now, config.tagCooldownMs)
-      store.remove(socket.id)
-      handlePlayerLeft(store.snapshot(), round, socket.id, now)
-      limiters.delete(socket.id)
-      violationCounts.delete(socket.id)
-      io.emit('player:left', { id: socket.id })
-      if (reassignment) broadcastTag(reassignment)
-      afterRoundChange(before, now)
+      const players = room.store.snapshot()
+      const reassignment = removePlayer(players, room.tagState, socket.id, now, config.tagCooldownMs)
+      room.store.remove(socket.id)
+      handlePlayerLeft(room.store.snapshot(), room.round, socket.id, now)
+      room.limiters.delete(socket.id)
+      room.violations.delete(socket.id)
+      io.to(room.id).emit('player:left', { id: socket.id })
+      if (reassignment) broadcastTag(room, reassignment)
+      afterRoundChange(room, before, now)
+      // An empty room has nothing left to share, so drop it and reclaim the code.
+      if (room.store.size === 0) rooms.remove(room.id)
     })
   })
 
-  // One broadcast per tick for the whole room instead of one per incoming move.
+  // One broadcast per tick per room instead of one per incoming move.
   // Tag contact is resolved here, so the client can never claim a valid tag.
-  // Scoring is only active while a round's timer is running.
+  // Scoring is only active while a room's timer is running.
   const tick = setInterval(() => {
-    const players = store.snapshot()
-    const now = Date.now()
-    const before = round.phase
-    maybeFinishRound(players, round, now)
+    for (const room of rooms.values()) {
+      if (room.store.size === 0) {
+        rooms.remove(room.id)
+        continue
+      }
+      const players = room.store.snapshot()
+      const now = Date.now()
+      const before = room.round.phase
+      maybeFinishRound(players, room.round, now)
 
-    if (isRoundActive(round)) {
-      const hit = evaluateTag(players, tagState, now, config.tagRadius, config.tagCooldownMs)
-      if (hit && applyTag(hit, players, tagState, now, config.tagCooldownMs)) broadcastTag(hit)
+      if (isRoundActive(room.round)) {
+        const hit = evaluateTag(players, room.tagState, now, config.tagRadius, config.tagCooldownMs)
+        if (hit && applyTag(hit, players, room.tagState, now, config.tagCooldownMs)) {
+          broadcastTag(room, hit)
+        }
+      }
+
+      io.to(room.id).emit('player:moved', { players: players.map(publicPlayer) })
+      afterRoundChange(room, before, now)
     }
-
-    io.to(ROOM).emit('player:moved', { players: players.map(publicPlayer) })
-    afterRoundChange(before, now)
   }, config.tickMs)
 
   function close() {
@@ -213,5 +241,5 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
     httpServer.close()
   }
 
-  return { app, httpServer, io, close, store, tagState, round }
+  return { app, httpServer, io, close, rooms }
 }

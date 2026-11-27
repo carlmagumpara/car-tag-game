@@ -3,7 +3,10 @@
 A standalone React + Vite + Tailwind CSS frontend and a separate Node.js/Express/Socket.IO
 server that lets visitors drive around the same stylized top-down city in real time and play
 **tag**: one driver is "it" and passes the role on by bumping into another car. Drivers ready up
-for a 30-second round (two drivers minimum); the one with the most tags when time runs out wins.
+for a timed round (two drivers minimum); the one with the most tags when time runs out wins.
+
+Every game lives in its **own room** with a random six-character code. Create a room, copy its
+link, and only drivers who join with that code see each other or share a scoreboard.
 
 - **Frontend:** React 19, Vite 8, Tailwind CSS 3, HTML Canvas, Socket.IO Client. JavaScript/JSX only.
 - **Backend:** Express 5, Socket.IO 4, in-memory player state.
@@ -15,11 +18,19 @@ for a 30-second round (two drivers minimum); the one with the most tags when tim
 ## 1. Architecture and data flow
 
 ```
-Browser A (Canvas + React UI) ─┐
-Browser B (Canvas + React UI) ─┼── Socket.IO ──> Node game server (in-memory players)
-Browser C (Canvas + React UI) ─┘                └── 20 Hz broadcast to the whole room
+Browser A (Canvas + React UI) ─┐  room ABC234
+Browser B (Canvas + React UI) ─┼── Socket.IO ──> Node game server
+Browser C (Canvas + React UI) ─┘  room XYZ789     └── in-memory RoomManager
+                                                       ├─ room ABC234: players/tag/round
+                                                       └─ room XYZ789: players/tag/round
 ```
 
+Clients pass a room code in the Socket.IO handshake; the server joins that room before sending
+`game:init`. All positional, tag and round broadcasts are scoped to that room, and empty rooms
+are deleted so their codes can be reused. A bare `/#/game` URL gets a freshly generated code.
+
+- Each room is an isolated `Room` instance with its own player store, tag state, round state,
+  rate limiters and Socket.IO room. A player can only ever see drivers with the same code.
 - Each browser runs its own **delta-time physics simulation** locally (see `src/features/car-game/game/physics.js`).
   Input never waits for a server round trip.
 - `GameCanvas.jsx` owns the single `requestAnimationFrame` loop. It reads input from a ref,
@@ -44,9 +55,10 @@ Browser C (Canvas + React UI) ─┘                └── 20 Hz broadcast to
 
 ```
 src/
-  App.jsx                              hash-based view switch (#/game), landing page
+  App.jsx                              hash routing (#/game/<CODE>), create/join landing page
   features/car-game/
-    CarGame.jsx                        composition, overlays, pause/exit
+    CarGame.jsx                        composition, overlays, pause/exit, copy room link
+    game/room-id.js                     six-character code generation/normalization
     GameCanvas.jsx                     rAF loop, camera, DPR canvas, effects
     components/GameHUD.jsx             speed, status, online count, pause/exit
     components/PlayerList.jsx          roster with color swatches
@@ -66,8 +78,9 @@ api/
 vercel.json                            Vercel Vite build + Function duration config
 server/
   src/index.js                         standalone entry (calls listen())
-  src/create-game-server.js            shared server factory, no listen() — used by both entries
-  src/config.js                        env parsing (port, CORS, player cap, tag, round tuning)
+  src/create-game-server.js            shared server factory with per-room broadcasting
+  src/rooms.js                         RoomManager, room state, shareable id generation
+  src/config.js                        env parsing (port, CORS, player/room caps, tag, round tuning)
   src/round.js                         pure round rules (ready, timer, winner, scoring window)
   src/tag.js                           pure tag rules (contact, cooldown, reassignment)
   src/validation.js                    movement validation + rate limiter (pure)
@@ -82,6 +95,9 @@ _tmp/                                  scratch verification scripts (gitignored)
 - `base: './'` in `vite.config.js` plus hash routing keeps one build working at a GitHub
   Pages project URL (`/<repo>/`), at a custom-domain root and at `localhost`, with no SPA
   404 rewrite needed. Override with `VITE_BASE_PATH=/` for a root deployment.
+- Room codes are six uppercase characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no `0/O`
+  or `1/I`). The client and server each generate the same format; keep `game/room-id.js` and
+  `server/src/rooms.js` in sync.
 - The server duplicates its world-limit constants instead of importing browser code, so it
   can be deployed as an isolated service. Keep `server/src/validation.js` in sync with
   `src/features/car-game/game/constants.js`.
@@ -123,10 +139,12 @@ npm run server     # http://localhost:3001  (health: /health)
 npm run dev        # http://localhost:5173  -> open /#/game
 ```
 
-Open `http://localhost:5173/#/game` in two browser windows to see both cars.
-Local defaults are `http://localhost:3001`, path `/socket.io` and both transports; the Vercel
-variables below only affect deployed builds. Root dependencies now also include the server
-packages (needed by the Vercel Function), though `server/` still has its own package.
+Open `http://localhost:5173/` and click **Create a room**; copy the code or **Copy link** from
+the HUD and open that link in a second window to see both cars. A bare `/#/game` URL also works
+— it generates a fresh room code. Local defaults are `http://localhost:3001`, path `/socket.io`
+and both transports; the Vercel variables below only affect deployed builds. Root dependencies
+now also include the server packages (needed by the Vercel Function), though `server/` still has
+its own package.
 
 Other scripts:
 
@@ -157,7 +175,8 @@ Backend (`server/.env`):
 | --- | --- | --- |
 | `PORT` | `3001` | Hosting platforms inject their assigned port; honored automatically. |
 | `CLIENT_ORIGINS` | `http://localhost:5173` | Comma-separated explicit origins for Socket.IO CORS. No wildcards. |
-| `MAX_PLAYERS` | `40` | Concurrent player cap (clamped to 2–200). |
+| `MAX_PLAYERS` | `40` | Concurrent player cap per room (clamped to 2–200). |
+| `MAX_ROOMS` | `200` | Simultaneous room cap (clamped to 1–1000); existing rooms can always be joined. |
 | `TAG_RADIUS` | `38` | Contact distance in world pixels for a valid tag (clamped to 20–80). |
 | `TAG_COOLDOWN_MS` | `1200` | Grace period after a tag before another tag can occur. |
 | `ROUND_SECONDS` | `60` | Length of a scoring round in seconds (clamped to 5–3600). |
@@ -170,18 +189,21 @@ are gitignored except the examples.
 ## 4. Socket.IO event protocol
 
 All events use JSON payloads. The server assigns the player ID; clients never choose one.
+A client requests a room through `auth: { roomId }` (or `query: { room }`). The server validates
+the six-character code, creates the room if needed, joins the socket and only then sends
+`game:init`. A missing/invalid code creates a fresh room whose id is returned in `game:init`.
 
 | Event | Direction | Payload | Notes |
 | --- | --- | --- | --- |
-| `game:init` | server → client | `{ id, player: Player, players: Player[], config: { maxPlayers, tickMs, world, tag, roundSeconds, minPlayers } }` | Sent immediately after connect. `players` excludes the new player; `tag` is `{ radius, cooldownMs }`. |
+| `game:init` | server → client | `{ id, roomId, player: Player, players: Player[], config: { maxPlayers, tickMs, world, tag, roundSeconds, minPlayers } }` | Sent immediately after joining the room. `players` are the other drivers **in that room**; `tag` is `{ radius, cooldownMs }`. |
 | `player:joined` | server → others | `Player` | A new car entered the city. |
 | `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; `false` cancels readiness. Ignored while the timer is running. |
 | `game:state` | server → room | `{ phase, roundSeconds, secondsLeft, endsAt, minPlayers, readyIds, winnerIds, standings }` | Sent on phase transitions/joins/readiness/leaves and once per countdown second. |
 | `player:move` | client → server | `{ x: number, y: number, angle: number, speed: number }` | At most 20 Hz; validated, clamped and rate limited. |
 | `player:moved` | server → room | `{ players: Player[] }` | One 20 Hz broadcast per room, not one per client message. |
-| `player:left` | server → all | `{ id: string }` | Sent on disconnect. |
+| `player:left` | server → room | `{ id: string }` | Sent on disconnect to the room the driver was in. |
 | `tag:hit` | server → room | `{ taggerId, taggedId, itId, reason, at, players: [{ id, isIt, tags }] }` | `reason` is `tag` for contact, `reassign` for the first/leaving tagger. Drives HUD toasts and flash effects. |
-| `game:error` | server → client | `{ code: string, message: string }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (dropped silently), `SERVER_FULL`. |
+| `game:error` | server → client | `{ code: string, message: string }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (dropped silently), `SERVER_FULL` (room full), `ROOM_UNAVAILABLE` (room cap reached). |
 
 `Player` shape:
 
@@ -211,7 +233,9 @@ All events use JSON payloads. The server assigns the player ID; clients never ch
   scores and reassigns "it".
 - Movement packets over ~25/s or faster than 40 ms apart are dropped per socket.
 - Five malformed packets (not rate-limited drops) disconnect that socket.
-- A full city emits `game:error` with `SERVER_FULL` and closes the connection.
+- A full room emits `game:error` with `SERVER_FULL` and closes the connection. If the room cap is
+  reached, a client asking for a new code gets `ROOM_UNAVAILABLE`. Rooms with no players are
+  deleted, so their codes become available again.
 
 ---
 
@@ -226,13 +250,18 @@ All events use JSON payloads. The server assigns the player ID; clients never ch
 | Pause / resume | `Esc` or Pause button | Pause button |
 | Leave game | Exit button | Exit button |
 
+**Rooms:** click **Create a room** on the landing page to get a random six-character code. Share
+the code or use **Copy link** in the HUD; anyone opening that link joins the same game. Enter a
+code in the landing page's "Have a code?" field to join an existing room. Drivers in other rooms
+are invisible and have separate tags and rounds.
+
 **Tag rules:** the driver with the flaming orange outline is "it". Drive into another car to
 tag them — the role and a "Tagged!" flash transfer to them. The HUD shows who is "it" and how
 many tags you have; the driver list marks the tagger with `IT`. Contact is resolved on the
 server, so bumping is enough — there is no separate tag button.
 
 **Round rules:** press `READY` in the HUD (or `Ready for next round` on the winner screen) to
-indicate you want to play. The 30-second timer starts only when there are at least two drivers
+indicate you want to play. The timer starts only when there are at least two drivers
 and **every** connected driver is ready. Tags scored before the timer starts do not count. When
 time runs out the driver with the most tags wins; ties share the win, and a scoreless round has
 no winner. Press ready again to start another round. If the room drops below two drivers while a
@@ -264,7 +293,7 @@ function in the same project as the static site. `vercel.json` selects the Vite 
    | `VITE_GAME_TRANSPORTS` | `websocket` | Vercel only upgrades WebSockets, not long-polling |
    | `VITE_GAME_SERVER_URL` | *(empty)* | Empty = same deployment origin; or set `https://<project>.vercel.app` |
    | `CLIENT_ORIGINS` | `https://<project>.vercel.app` | Server-side CORS allowlist; add custom domains too |
-   | `MAX_PLAYERS`, `TAG_RADIUS`, `TAG_COOLDOWN_MS`, `ROUND_SECONDS` | *(optional)* | Same tuning as standalone |
+   | `MAX_PLAYERS`, `MAX_ROOMS`, `TAG_RADIUS`, `TAG_COOLDOWN_MS`, `ROUND_SECONDS` | *(optional)* | Same tuning as standalone |
 
    `VITE_*` values are public build-time settings; `CLIENT_ORIGINS` is server-only.
 4. Deploy. Open `https://<project>.vercel.app/#/game` in two windows to test.
@@ -277,10 +306,11 @@ Important Vercel-specific behavior:
 - A WebSocket connection is pinned to the function instance that accepted it and closes when
   that function reaches `maxDuration` (300 s here). The client already auto-reconnects; after
   a reconnect the player respawns with a fresh id.
-- New connections can land on **different instances**. Player/tag state is in memory, so
-  players on different instances will not see each other. This is acceptable for a small
-  portfolio demo but does not scale; use Vercel Marketplace Redis (or another shared store /
-  pub-sub) to share rooms and presence across instances.
+- New connections can land on **different instances**. Room state is in memory, so a room only
+  lives on the instance that created it: two drivers with the same code can still end up on
+  different instances and not see each other. This is acceptable for a small portfolio demo but
+  does not scale; use Vercel Marketplace Redis (or another shared store / pub-sub) to share room
+  state and presence across instances.
 - The root `package.json` includes `express`, `socket.io` and `dotenv` because Vercel installs
   root dependencies for Functions; `server/package.json` keeps the standalone copy.
 
@@ -319,8 +349,10 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 | Build fails in Actions | Repository variable `VITE_GAME_SERVER_URL` must be set. |
 | Vercel game won't connect | `VITE_GAME_SOCKET_PATH=/api/game` (exact path), `VITE_GAME_TRANSPORTS=websocket`, and Fluid Compute enabled. |
 | Vercel health 404 | Use `GET /api/game`; `/api/game/health` is not routed to the function. Check the Functions tab if `/api/game` 404s. |
-| Players split into separate lobbies | Different function instances hold separate in-memory state; add Redis/pub-sub for scale. |
-| Server restarts / players drop | Expected: state is in memory; clients reconnect automatically and respawn. |
+| Players with the same code cannot see each other | They may be on different function instances; add Redis/pub-sub for shared room state. |
+| "Copy link" gives the wrong room | The code comes from the server's `game:init`; check the HUD shows the same code as the URL. |
+| Room cap reached | Raise `MAX_ROOMS` or wait for empty rooms to expire; existing codes still work. |
+| Server restarts / players drop | Expected: state is in memory; clients reconnect automatically into a fresh room with the same code. |
 
 ---
 
@@ -329,7 +361,7 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 Automated (all executed during implementation):
 
 ```bash
-npm run test:all           # 20 frontend + 21 server tests (incl. tag and round rules) — all passed
+npm run test:all           # 28 frontend + 28 server tests (incl. rooms, tag and round rules) — all passed
 npm run build              # production build — passed
 npm run server             # then: curl http://localhost:3001/health
 node _tmp/integration-check.mjs    # two Socket.IO clients: init/join/move/leave/error/reconnect
@@ -338,6 +370,9 @@ node _tmp/vercel-function-check.mjs  # api/game.js behind emulated /api/game rou
 node _tmp/reconnect-check.mjs      # stop/restart server -> client auto-reconnect
 ```
 
+The room tests cover code generation/normalization, per-room state isolation, the room cap,
+and two live Socket.IO clients that join different codes and receive only their own players.
+
 Browser verification used two isolated Chromium contexts against both `npm run dev` and
 the production preview (`npm run preview`): both drivers appeared, driving changed the HUD
 speed, closing one session removed its car, pause/resume worked, and there were no console
@@ -345,15 +380,18 @@ or page errors. `_tmp/` scripts are scratch tooling, gitignored and not required
 
 Manual test checklist:
 
-1. `npm run server`, `npm run dev`, open two windows at `/#/game`.
-2. Drive with WASD/arrows; hold Space while turning to drift; confirm skid marks.
-3. Drive to a world edge and into a building; confirm the car is blocked.
-4. Drive the tagged car into the other one; confirm "it", the flash and the tag count transfer.
-5. Close one window; the other should show the player leaving (and "it" reassigned if needed).
-6. Click `READY` on one client: the timer stays paused. Click `READY` on the other: the 30-second
-   countdown begins and scores reset. Check the winner screen when time runs out.
-7. Stop and restart the server; both clients should show "Connection lost", then reconnect.
-8. Resize the window and test on a phone-sized viewport for touch controls.
+1. `npm run server`, `npm run dev`, open the landing page. Click **Create a room**, note the
+   code, then **Copy link** and open it in a second window: both cars should appear.
+2. Open a third window with a different code; it should not see either of the first two cars.
+3. Drive with WASD/arrows; hold Space while turning to drift; confirm skid marks.
+4. Drive to a world edge and into a building; confirm the car is blocked.
+5. Drive the tagged car into the other one; confirm "it", the flash and the tag count transfer.
+6. Close one window; the other should show the player leaving (and "it" reassigned if needed).
+7. Click `READY` on one client: the timer stays paused. Click `READY` on the other: the countdown
+   begins and scores reset. Check the winner screen when time runs out.
+8. Stop and restart the server; both clients should show "Connection lost", then reconnect into
+   the same room with fresh state.
+9. Resize the window and test on a phone-sized viewport for touch controls.
 
 ---
 
@@ -378,7 +416,8 @@ Manual test checklist:
   however, **is** server-authoritative: clients only receive `tag:hit` results and cannot
   claim tags or edit "it"/score fields.
 - There is **no authentication or persistent identity**: names, colors and IDs are generated
-  per connection. A page reload produces a new driver.
+  per connection. A page reload produces a new driver. Room codes are shareable links, not
+  secrets — anyone with a code can join that room.
 - CORS is restricted to explicitly configured origins, but the public game is deliberately
   open to anyone who can load the frontend; abuse at scale needs a proxy/rate limits at the
   hosting layer.
@@ -395,9 +434,12 @@ Manual test checklist:
   overlap visually.
 - Because physics is client-side, a modified client can still get close enough to tag
   unfairly; authoritative physics would close that gap.
-- In-memory state means a server restart clears the city, tags and all players.
-- Single room only; no private games, chat or persistent scoreboards (tag counts reset each
-  round and on disconnect).
-- Spawn slots repeat after 12 concurrent players.
+- In-memory state means a server restart clears every room, its tags and all players. On a
+  multi-instance host (e.g. Vercel), rooms are also isolated per function instance.
+- Rooms are open to anyone with the code: there is no password or host control, and no chat or
+  persistent scoreboard (tag counts reset each round and on disconnect).
+- Empty rooms are removed, so a code can be reused later by a different group.
+- Spawn slots repeat after 12 concurrent players in a room.
 - Future work: server-authoritative physics with input messages, proper collision-based tags,
-  multiple rooms, persistent profiles and scoreboards, and an authoritative drift flag.
+  shared room state across instances, persistent profiles and scoreboards, and an authoritative
+  drift flag.

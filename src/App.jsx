@@ -1,11 +1,30 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import CarGame from './features/car-game/CarGame.jsx'
+import { createRoomId, normalizeRoomId } from './features/car-game/game/room-id.js'
 
-function getRoute() {
-  return window.location.hash.replace(/^#/, '') || '/'
+function parseRoute() {
+  const path = window.location.hash.replace(/^#/, '') || '/'
+  if (path === '/game') return { view: 'game', roomId: null }
+  const match = path.match(/^\/game\/([^/]+)$/)
+  if (match) return { view: 'game', roomId: match[1] }
+  return { view: 'landing', roomId: null }
 }
 
-function Landing({ onPlay }) {
+function Landing({ onPlay, onJoin }) {
+  const [code, setCode] = useState('')
+  const [invalid, setInvalid] = useState(false)
+
+  const submit = (event) => {
+    event.preventDefault()
+    const roomId = normalizeRoomId(code)
+    if (!roomId) {
+      setInvalid(true)
+      return
+    }
+    setInvalid(false)
+    onJoin(roomId)
+  }
+
   return (
     <main className="min-h-dvh bg-slate-950 text-slate-100">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(ellipse_at_top,rgba(34,211,238,0.16),transparent_60%)]" />
@@ -22,7 +41,7 @@ function Landing({ onPlay }) {
 
       <section className="relative mx-auto max-w-6xl px-6 pb-16 pt-12 sm:pt-20">
         <p className="mb-4 font-mono text-xs uppercase tracking-[0.35em] text-cyan-400">
-          A tiny city, one tagger, everyone online
+          A tiny city, one tagger, your own private room
         </p>
         <h1 className="max-w-3xl text-4xl font-bold leading-tight tracking-tight sm:text-6xl">
           Drive together in a city that{' '}
@@ -31,9 +50,9 @@ function Landing({ onPlay }) {
           </span>
         </h1>
         <p className="mt-6 max-w-xl text-base leading-relaxed text-slate-400 sm:text-lg">
-          Hop into a shared top-down city, drift through intersections, and play tag with other
-          drivers in real time. One car is "it" — bump into someone to pass it on. No account, no
-          download — just open the page and go.
+          Start a room, share its six-character code, and drift through a shared top-down city with
+          your friends in real time. One car is "it" — bump into someone to pass it on. No account,
+          no download — just open the link and go.
         </p>
 
         <div className="mt-9 flex flex-wrap items-center gap-4">
@@ -42,10 +61,38 @@ function Landing({ onPlay }) {
             onClick={onPlay}
             className="rounded-xl bg-cyan-400 px-7 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:bg-cyan-300"
           >
-            Enter the city →
+            Create a room →
           </button>
           <span className="font-mono text-xs text-slate-500">WASD / arrows to drive · Space to drift</span>
         </div>
+
+        <form onSubmit={submit} className="mt-6 flex flex-wrap items-center gap-3">
+          <label htmlFor="room-code" className="font-mono text-xs uppercase tracking-widest text-slate-500">
+            Have a code?
+          </label>
+          <input
+            id="room-code"
+            value={code}
+            onChange={(event) => {
+              setCode(event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, '').slice(0, 6))
+              setInvalid(false)
+            }}
+            placeholder="ABC234"
+            autoComplete="off"
+            spellCheck="false"
+            aria-invalid={invalid}
+            className="w-32 rounded-lg border border-white/15 bg-white/5 px-3 py-2 font-mono text-sm uppercase tracking-[0.2em] text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-400/60"
+          />
+          <button
+            type="submit"
+            className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 font-mono text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
+          >
+            Join room
+          </button>
+          {invalid && (
+            <span className="font-mono text-[11px] text-rose-300">Enter the 6-character room code.</span>
+          )}
+        </form>
 
         <div className="mt-16 grid gap-4 sm:grid-cols-3">
           {[
@@ -58,8 +105,8 @@ function Landing({ onPlay }) {
               body: 'Accelerate, reverse, handbrake-drift and slide around corners with delta-time physics.',
             },
             {
-              title: 'Pick up and play',
-              body: 'Keyboard on desktop, touch controls on mobile. Reconnects automatically after a drop.',
+              title: 'Your own room',
+              body: 'Create a game, copy the link and race with just your friends. Codes are six characters.',
             },
           ].map((card) => (
             <div
@@ -81,17 +128,47 @@ function Landing({ onPlay }) {
 }
 
 export default function App() {
-  const [route, setRoute] = useState(getRoute)
+  const [route, setRoute] = useState(parseRoute)
 
   useEffect(() => {
-    const onHashChange = () => setRoute(getRoute())
+    const onHashChange = () => setRoute(parseRoute())
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  if (route === '/game') {
-    return <CarGame onExit={() => { window.location.hash = '/' }} />
+  // A bare /#/game (or a malformed code) gets a fresh shareable code rather
+  // than silently joining the wrong room.
+  const roomId = useMemo(
+    () => (route.view === 'game' ? normalizeRoomId(route.roomId) || createRoomId() : null),
+    [route.view, route.roomId],
+  )
+
+  useEffect(() => {
+    if (route.view === 'game' && roomId !== route.roomId) {
+      window.location.hash = `/game/${roomId}`
+    }
+  }, [route.view, route.roomId, roomId])
+
+  if (route.view === 'game') {
+    return (
+      <CarGame
+        key={roomId}
+        roomId={roomId}
+        onExit={() => {
+          window.location.hash = '/'
+        }}
+      />
+    )
   }
 
-  return <Landing onPlay={() => { window.location.hash = '/game' }} />
+  return (
+    <Landing
+      onPlay={() => {
+        window.location.hash = `/game/${createRoomId()}`
+      }}
+      onJoin={(code) => {
+        window.location.hash = `/game/${code}`
+      }}
+    />
+  )
 }

@@ -5,6 +5,7 @@ import GameHUD from './components/GameHUD.jsx'
 import PlayerList from './components/PlayerList.jsx'
 import TouchControls from './components/TouchControls.jsx'
 import { getSocketConfig } from './game/socket-config.js'
+import { roomUrl } from './game/room-id.js'
 import { useKeyboard } from './hooks/useKeyboard.js'
 import { useMultiplayer } from './hooks/useMultiplayer.js'
 
@@ -46,12 +47,29 @@ function Spinner() {
   )
 }
 
-export default function CarGame({ onExit }) {
+export default function CarGame({ onExit, roomId }) {
   const [paused, setPaused] = useState(false)
   const [hud, setHud] = useState({ speed: 0, drifting: false, x: 0, y: 0 })
+  const [copied, setCopied] = useState(false)
 
-  const { status, error, self, roster, playerCount, playersRef, sendMove, reconnect, tagEvent, game, sendReady } =
-    useMultiplayer({ ...socketConfig, enabled: true })
+  const {
+    status,
+    error,
+    self,
+    roster,
+    playerCount,
+    playersRef,
+    sendMove,
+    reconnect,
+    tagEvent,
+    game,
+    sendReady,
+    roomId: activeRoomId,
+  } = useMultiplayer({ ...socketConfig, roomId, enabled: true })
+
+  // Usually the same as the URL code; the server's value wins if a raw client
+  // connected without one, so the copied link always points to the real room.
+  const shareRoomId = activeRoomId || roomId
 
   const isIt = Boolean(self?.isIt)
   const itName = roster.find((player) => player.isIt)?.name || 'Nobody'
@@ -67,6 +85,36 @@ export default function CarGame({ onExit }) {
   const { inputRef, clear } = useKeyboard({ enabled: controlsEnabled })
 
   const handleHudUpdate = useCallback((next) => setHud(next), [])
+
+  const copyLink = useCallback(async () => {
+    if (!shareRoomId) return
+    const url = roomUrl(shareRoomId)
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url)
+      } else {
+        const input = document.createElement('textarea')
+        input.value = url
+        input.style.position = 'fixed'
+        input.style.opacity = '0'
+        document.body.appendChild(input)
+        input.select()
+        document.execCommand('copy')
+        input.remove()
+      }
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }, [shareRoomId])
+
+  useEffect(() => setCopied(false), [shareRoomId])
+
+  useEffect(() => {
+    if (!copied) return undefined
+    const timer = setTimeout(() => setCopied(false), 2000)
+    return () => clearTimeout(timer)
+  }, [copied])
 
   const handleTouch = useCallback(
     (action, pressed) => {
@@ -93,8 +141,8 @@ export default function CarGame({ onExit }) {
   const needsConnectionOverlay = status !== 'connected' || !self
 
   return (
-    <main className="min-h-dvh bg-slate-950 p-2 sm:p-4">
-      <div className="relative mx-auto h-[calc(100dvh-1rem)] max-w-[1600px] overflow-hidden rounded-2xl border border-white/10 bg-[#0b1120] shadow-2xl shadow-cyan-500/5 sm:h-[calc(100dvh-2rem)]">
+    <main className="h-dvh w-screen overflow-hidden bg-slate-950">
+      <div className="relative h-full w-full overflow-hidden bg-[#0b1120]">
         <GameCanvas
           inputRef={inputRef}
           playersRef={playersRef}
@@ -117,6 +165,9 @@ export default function CarGame({ onExit }) {
           tags={tags}
           game={game}
           ready={ready}
+          roomId={shareRoomId}
+          copied={copied}
+          onCopyLink={copyLink}
           onToggleReady={() => sendReady(!ready)}
           onTogglePause={() => setPaused((value) => !value)}
           onExit={onExit}
