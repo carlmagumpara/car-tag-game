@@ -160,7 +160,7 @@ Backend (`server/.env`):
 | `MAX_PLAYERS` | `40` | Concurrent player cap (clamped to 2–200). |
 | `TAG_RADIUS` | `38` | Contact distance in world pixels for a valid tag (clamped to 20–80). |
 | `TAG_COOLDOWN_MS` | `1200` | Grace period after a tag before another tag can occur. |
-| `ROUND_SECONDS` | `30` | Length of a scoring round in seconds (clamped to 5–3600). |
+| `ROUND_SECONDS` | `60` | Length of a scoring round in seconds (clamped to 5–3600). |
 
 `.env.example` files in both folders list every variable with placeholders. `.env*` files
 are gitignored except the examples.

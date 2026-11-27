@@ -30,7 +30,7 @@ export default function GameHUD({
   const connection = STATUS_STYLES[status] || STATUS_STYLES.offline
   const phase = game?.phase || 'waiting'
   const playing = phase === 'playing'
-  const secondsLeft = game?.secondsLeft ?? game?.roundSeconds ?? 30
+  const secondsLeft = game?.secondsLeft ?? game?.roundSeconds ?? 60
   const readyCount = game?.readyIds?.length || 0
   const minPlayers = game?.minPlayers || 2
 
