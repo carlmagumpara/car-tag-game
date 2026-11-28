@@ -48,6 +48,13 @@ export function assignAiIt(match, players, id) {
   return { taggerId: null, taggedId: id, itId: id, reason: 'reassign', at: 0 }
 }
 
+// The rival holds position until a round is armed by READY. It may line up
+// during the countdown like a human driver, but it must not chase while the
+// player is still waiting to start (or while the results are on screen).
+export function canAiDrive(match) {
+  return match.phase === 'countdown' || match.phase === 'playing'
+}
+
 export function armAiCountdown(match, players, now) {
   if (players.length < AI_MATCH.minPlayers) return false
   if (match.phase === 'playing' || match.phase === 'countdown') return false

@@ -5,6 +5,7 @@ import {
   applyAiTag,
   armAiCountdown,
   assignAiIt,
+  canAiDrive,
   createAiMatch,
   evaluateAiTag,
   maybeFinishAiRound,
@@ -55,6 +56,26 @@ test('a new match waits for the countdown before playing', () => {
   assert.equal(match.phase, 'playing')
   assert.equal(match.endsAt, 4000 + match.roundSeconds * 1000)
   assert.ok(players.every((player) => player.ready === false && player.tags === 0))
+})
+
+test('the rival stays parked until the player readies up', () => {
+  const match = createAiMatch(1000)
+  const players = [driver('you'), driver('ai')]
+  assignAiIt(match, players, 'ai')
+
+  assert.equal(canAiDrive(match), false)
+  setAiReady(match, players, 'you', true, 1000)
+  assert.equal(canAiDrive(match), true)
+
+  // Cancelling READY parks the rival again.
+  setAiReady(match, players, 'you', false, 1100)
+  assert.equal(canAiDrive(match), false)
+
+  startRound(match, players, 4000)
+  assert.equal(canAiDrive(match), true)
+
+  maybeFinishAiRound(match, players, match.endsAt, 'ai')
+  assert.equal(canAiDrive(match), false)
 })
 
 test('the AI starts as it and readiness cannot change mid-round', () => {

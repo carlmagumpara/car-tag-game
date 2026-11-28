@@ -40,8 +40,9 @@ mode in the mode picker:
 - **Multiplayer:** click **Create a room** and share the code or **Copy link** from the HUD. Once
   two drivers are connected, a 3-second countdown starts the 90-second round automatically.
   **READY**/cancel is optional and stops or re-arms the countdown. Newcomers may join mid-round.
-- **You vs AI:** click **Play vs AI**, then click **READY** in the HUD. The rival readies up with
-  you, a 3-second countdown runs, and the 90-second round starts.
+- **You vs AI:** click **Play vs AI**, then click **READY** in the HUD. The rival stays parked until
+  you ready up, then readies up with you, a 3-second countdown runs, and the 90-second round starts.
+  Cancelling READY parks it again.
 
 ### 3. Drive
 

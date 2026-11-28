@@ -5,6 +5,7 @@ import {
   applyAiTag,
   armAiCountdown,
   assignAiIt,
+  canAiDrive,
   createAiMatch,
   evaluateAiTag,
   maybeFinishAiRound,
@@ -147,8 +148,16 @@ export function useAiGame({ carColor, driverName }) {
     lastTickRef.current = now
     if (dt <= 0) return
 
-    const input = driveAi({ ai, player, world, brain: brainRef.current, now, dt })
-    stepVehicle(ai, getDriveAxis(input), dt, world)
+    if (canAiDrive(match)) {
+      const input = driveAi({ ai, player, world, brain: brainRef.current, now, dt })
+      stepVehicle(ai, getDriveAxis(input), dt, world)
+    } else {
+      // Waiting for READY (or showing results): hold the rival completely still.
+      ai.vx = 0
+      ai.vy = 0
+      ai.speed = 0
+      ai.drifting = false
+    }
 
     const players = [player, ai]
     const hit = evaluateAiTag(match, players, now)
