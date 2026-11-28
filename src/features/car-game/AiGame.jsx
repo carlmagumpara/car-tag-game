@@ -8,6 +8,10 @@ import {
   playImmunitySound,
   playRoundEndSound,
   playTagSound,
+  setAudioMuted,
+  startBackgroundMusic,
+  stopBackgroundMusic,
+  stopEngine,
   unlockAudio,
 } from './game/audio.js'
 import { AI_MATCH } from './game/ai-match.js'
@@ -56,6 +60,7 @@ function Spinner() {
 // or touches a socket, so the two modes cannot interfere with each other.
 export default function AiGame({ onExit, carColor, driverName }) {
   const [paused, setPaused] = useState(false)
+  const [muted, setMuted] = useState(false)
   const [hud, setHud] = useState({ speed: 0, drifting: false, x: 0, y: 0 })
 
   const { self, roster, playersRef, sendMove, sendReady, tagEvent, game, restart } = useAiGame({
@@ -116,6 +121,16 @@ export default function AiGame({ onExit, carColor, driverName }) {
   }, [])
 
   useEffect(() => {
+    startBackgroundMusic()
+    return () => {
+      stopBackgroundMusic()
+      stopEngine()
+    }
+  }, [])
+
+  useEffect(() => setAudioMuted(muted), [muted])
+
+  useEffect(() => {
     if (!tagEvent || lastTagRef.current === tagEvent) return
     lastTagRef.current = tagEvent
     if (tagEvent.reason === 'tag') playTagSound()
@@ -158,6 +173,8 @@ export default function AiGame({ onExit, carColor, driverName }) {
               ready={ready}
               onToggleReady={() => sendReady(!ready)}
               onTogglePause={() => setPaused((value) => !value)}
+              muted={muted}
+              onToggleMuted={() => setMuted((value) => !value)}
               onExit={onExit}
             />
             <PlayerList players={roster} selfId={self?.id} />

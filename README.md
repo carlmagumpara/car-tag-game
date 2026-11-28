@@ -52,11 +52,14 @@ mode in the mode picker:
 | Steer | `A` / `D` or `←` / `→` | ◀ / ▶ |
 | Handbrake drift | `Space` | DRIFT |
 | Pause / resume | `Esc` or Pause button | Pause button |
+| Mute / unmute sound | Sound on/off button | Sound on/off button |
 | Exit | Exit button | Exit button |
 
 The HUD shows your speed ("km/h" is a display scale, not a real speed), your position, who is
 "it" and your tag count. The driver list marks the tagger with `IT`, ready drivers with `RDY`
-and your own car with `YOU`. See §5 for the full controls reference.
+and your own car with `YOU`. A synthesized soundtrack and an engine note (which rises with speed
+and throttle) start after your first key press or tap; **Sound on/off** in the HUD mutes them.
+See §5 for the full controls reference.
 
 ### 4. Play tag
 
@@ -391,6 +394,7 @@ receives the live round, tag and shield state in `game:init`.
 | Steer left / right | `A` / `D` or `←` / `→` | ◀ / ▶ |
 | Handbrake drift | `Space` | DRIFT |
 | Pause / resume | `Esc` or Pause button | Pause button |
+| Mute / unmute sound | Sound on/off button | Sound on/off button |
 | Leave game | Exit button | Exit button |
 
 **Your name:** type a driver name or click **Random** before you can create or join a room — both
@@ -543,7 +547,7 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 Automated (all executed during implementation):
 
 ```bash
-npm run test:all           # 70 frontend + 47 server tests (AI steering/match, rooms, tag, round, chat, voice, names, mid-round joins, simultaneous tags) — all passed
+npm run test:all           # 71 frontend + 47 server tests (AI steering/match, rooms, tag, round, chat, voice, names, audio, mid-round joins, simultaneous tags) — all passed
 npm run build              # production build — passed
 npm run server             # then: curl http://localhost:3001/health
 node _tmp/ai-mode-check.mjs        # browser: mode picker, full AI round + restart, multiplayer regression

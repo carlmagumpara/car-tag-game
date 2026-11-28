@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef } from 'react'
+import { updateEngine } from './game/audio.js'
 import { NETWORK, PHYSICS } from './game/constants.js'
 import { getDriveAxis } from './game/input.js'
 import { sampleState } from './game/interpolation.js'
@@ -129,9 +130,11 @@ function GameCanvas({ inputRef, playersRef, self, sendMove, onHudUpdate, paused,
       const local = localRef.current
       const camera = cameraRef.current
       const active = Boolean(local) && !pausedRef.current && !document.hidden
+      let accelerating = false
 
       if (active) {
         const axis = getDriveAxis(inputRef.current)
+        accelerating = Boolean(axis.throttle || axis.reverse)
         stepVehicle(local, axis, dt, world)
 
         // Visual-only suspension cues: never fed back into the physics model.
@@ -197,6 +200,8 @@ function GameCanvas({ inputRef, playersRef, self, sendMove, onHudUpdate, paused,
           lastSend = now
         }
       }
+
+      updateEngine(local?.speed || 0, accelerating, active)
 
       const scratch = scratchRef.current
       const remotes = remotesRef.current

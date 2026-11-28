@@ -18,6 +18,7 @@ export default function GameHUD({
   playerCount,
   position,
   paused,
+  muted,
   isIt,
   itName,
   tags,
@@ -29,6 +30,7 @@ export default function GameHUD({
   onCopyLink,
   onToggleReady,
   onTogglePause,
+  onToggleMuted,
   onExit,
 }) {
   const connection = STATUS_STYLES[status] || STATUS_STYLES.offline
@@ -138,7 +140,20 @@ export default function GameHUD({
         )}
       </div>
 
-      <div className="pointer-events-auto flex gap-2">
+      <div className="pointer-events-auto flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onToggleMuted}
+          aria-pressed={!muted}
+          aria-label={muted ? 'Unmute sound' : 'Mute sound'}
+          className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] backdrop-blur-md transition ${
+            muted
+              ? 'border-white/10 bg-slate-950/75 text-slate-400 hover:text-white'
+              : 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20'
+          }`}
+        >
+          {muted ? 'Sound off' : 'Sound on'}
+        </button>
         <button
           type="button"
           onClick={onTogglePause}

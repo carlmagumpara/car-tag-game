@@ -94,6 +94,7 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │       └── game/                  PURE, DOM-light logic (unit-tested directly by Node)
 │           ├── ai.js              AI steering: chase/flee, obstacle probing, smoothing
 │           ├── ai-match.js        local tag/round rules (mirrors server pure modules)
+│           ├── audio.js           WebAudio soundtrack, engine note and event cues
 │           ├── chat.js            client chat input normalization
 │           ├── player-name.js     random name, normalization, localStorage persistence
 │           ├── voice-config.js    build-time STUN configuration
@@ -179,9 +180,9 @@ Useful scripts (from root unless noted):
 | `npm run dev` | Vite dev server at `http://localhost:5173` |
 | `npm run server` | Standalone game server at `http://localhost:3001` (`GET /health`) |
 | `npm run build` / `npm run preview` | Production build into `dist/` / preview at `:4173` |
-| `npm test` | 70 frontend/node:test suites (`tests/*.test.js`) |
+| `npm test` | 71 frontend/node:test suites (`tests/*.test.js`) |
 | `npm run test:server` | 47 server suites (`server/test/*.test.js`) |
-| `npm run test:all` | both suites (117 tests total at time of writing) |
+| `npm run test:all` | both suites (118 tests total at time of writing) |
 | `cd server && npm run dev` | server with `--watch` auto-restart |
 
 ---
@@ -235,7 +236,9 @@ Useful scripts (from root unless noted):
   buffers), `inputRef`, `socketRef`, camera/skids/particles and the canvas context are refs.
   Network state is 20 Hz; HUD React updates are throttled to 5 Hz (`NETWORK.hudIntervalMs`).
 - Avoid allocations in the render loop: `sampleState(..., out)` writes into a scratch object;
-  skids/particles use in-place compaction (`compactLifetimes`) and hard caps (220/120).
+  skids/particles use in-place compaction (`compactLifetimes`) and hard caps (220/120). Audio is
+  updated the same way: `GameCanvas` calls `updateEngine()` with local speed/throttle each frame,
+  and `audio.js` automates persistent WebAudio nodes without any React state.
 - `dt` is clamped to 50 ms and the frame clock resets on `visibilitychange` so a backgrounded
   tab cannot simulate a huge step.
 - Static city is pre-rendered once to an offscreen canvas (`createCityCanvas`) and blitted per
@@ -414,7 +417,7 @@ route — `/api/game/health` is **not** routed).
   both import pure modules directly under Node, like the rest of the frontend suites.
 - Verify with:
   ```bash
-  npm run test:all        # 70 frontend + 47 server tests
+  npm run test:all        # 71 frontend + 47 server tests
   npm run build           # production build must succeed
   ```
 - Manual verification lives in `_tmp/*.mjs` scratch Playwright scripts (two isolated browser

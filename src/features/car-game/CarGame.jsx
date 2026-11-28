@@ -10,6 +10,10 @@ import {
   playImmunitySound,
   playRoundEndSound,
   playTagSound,
+  setAudioMuted,
+  startBackgroundMusic,
+  stopBackgroundMusic,
+  stopEngine,
   unlockAudio,
 } from './game/audio.js'
 import { getSocketConfig } from './game/socket-config.js'
@@ -61,6 +65,7 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
   const [paused, setPaused] = useState(false)
   const [hud, setHud] = useState({ speed: 0, drifting: false, x: 0, y: 0 })
   const [copied, setCopied] = useState(false)
+  const [muted, setMuted] = useState(false)
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [voiceMuted, setVoiceMuted] = useState(false)
 
@@ -181,6 +186,16 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
   }, [])
 
   useEffect(() => {
+    startBackgroundMusic()
+    return () => {
+      stopBackgroundMusic()
+      stopEngine()
+    }
+  }, [])
+
+  useEffect(() => setAudioMuted(muted), [muted])
+
+  useEffect(() => {
     if (!tagEvent || lastTagRef.current === tagEvent) return
     lastTagRef.current = tagEvent
     if (tagEvent.reason === 'tag') playTagSound()
@@ -228,6 +243,8 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
           onCopyLink={copyLink}
           onToggleReady={() => sendReady(!ready)}
           onTogglePause={() => setPaused((value) => !value)}
+          muted={muted}
+          onToggleMuted={() => setMuted((value) => !value)}
           onExit={onExit}
         />
 
