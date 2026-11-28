@@ -6,7 +6,7 @@ export const WORLD = Object.freeze({
   width: 3200,
   height: 2560,
   grid: 320,
-  roadWidth: 88,
+  roadWidth: 128, // wide enough for two cars to pass; blocks shrink to match
   sidewalk: 14,
 })
 

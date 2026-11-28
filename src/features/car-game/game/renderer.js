@@ -10,6 +10,10 @@ const PALETTE = {
   lot: '#2b3542',
   building: ['#34455a', '#2d3d50', '#3a4a5e', '#2a394c'],
   tree: ['#2f7d50', '#276b45', '#378c59'],
+  lawn: '#22402f',
+  houseRoof: ['#b45309', '#7f1d1d', '#1e3a5f', '#4c1d95', '#166534'],
+  playground: ['#9a3412', '#1d4ed8', '#b45309'],
+  storeStripe: ['#ef4444', '#f97316', '#22c55e'],
   skid: 'rgba(6, 10, 16, 0.55)',
 }
 
@@ -80,14 +84,23 @@ function drawGround(ctx, world) {
 function drawBlockBases(ctx, world) {
   const asphaltNoise = noisePattern(world.seed + 11, '#dbe4ee', 5000)
   for (const block of world.blocks) {
-    if (block.type === 'park') {
-      ctx.fillStyle = PALETTE.park
+    if (block.type === 'park' || block.type === 'playground') {
+      ctx.fillStyle = block.type === 'park' ? PALETTE.park : PALETTE.lawn
       ctx.fillRect(block.x, block.y, block.size, block.size)
       ctx.fillStyle = noisePattern(block.seed, '#86efac', 2200)
       ctx.fillRect(block.x, block.y, block.size, block.size)
-      ctx.fillStyle = PALETTE.parkPath
-      ctx.fillRect(block.pathX - 7, block.y, 14, block.size)
-      ctx.fillRect(block.x, block.pathY - 7, block.size, 14)
+      if (block.type === 'park') {
+        ctx.fillStyle = PALETTE.parkPath
+        ctx.fillRect(block.pathX - 7, block.y, 14, block.size)
+        ctx.fillRect(block.x, block.pathY - 7, block.size, 14)
+      }
+      continue
+    }
+    if (block.type === 'houses') {
+      ctx.fillStyle = PALETTE.lawn
+      ctx.fillRect(block.x, block.y, block.size, block.size)
+      ctx.fillStyle = noisePattern(block.seed, '#a3e635', 1400)
+      ctx.fillRect(block.x, block.y, block.size, block.size)
       continue
     }
     if (block.type === 'lot') {
@@ -97,8 +110,8 @@ function drawBlockBases(ctx, world) {
       ctx.fillRect(block.x, block.y, block.size, block.size)
       ctx.strokeStyle = 'rgba(226, 232, 240, 0.35)'
       ctx.lineWidth = 1.5
-      for (let i = 0; i < 6; i += 1) {
-        const x = block.x + 18 + i * 31
+      for (let i = 0; i < 5; i += 1) {
+        const x = block.x + 16 + i * 30
         ctx.beginPath()
         ctx.moveTo(x, block.y + 76)
         ctx.lineTo(x, block.y + block.size - 14)
@@ -288,21 +301,36 @@ function drawTree(ctx, tree) {
 }
 
 function drawParkedCar(ctx, car) {
+  // Background traffic follows the same low wedge silhouette as the drivers.
   ctx.save()
   ctx.translate(car.x, car.y)
   ctx.rotate(car.angle)
   ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
   roundedRect(ctx, -18, -9, 38, 20, 6)
   ctx.fill()
-  ctx.fillStyle = car.color
-  roundedRect(ctx, -19, -9, 38, 18, 5)
+  const paint = ctx.createLinearGradient(0, -9, 0, 9)
+  paint.addColorStop(0, shade(car.color, 0.25))
+  paint.addColorStop(1, shade(car.color, -0.3))
+  ctx.fillStyle = paint
+  ctx.beginPath()
+  ctx.moveTo(-18, -8)
+  ctx.lineTo(-18, 8)
+  ctx.quadraticCurveTo(-10, 10, -2, 9)
+  ctx.lineTo(14, 6)
+  ctx.quadraticCurveTo(20, 2, 20, 0)
+  ctx.quadraticCurveTo(20, -2, 14, -6)
+  ctx.lineTo(-2, -9)
+  ctx.quadraticCurveTo(-10, -10, -18, -8)
+  ctx.closePath()
   ctx.fill()
-  ctx.fillStyle = 'rgba(10, 18, 28, 0.75)'
-  roundedRect(ctx, -5, -7, 12, 14, 3)
+  ctx.fillStyle = 'rgba(10, 18, 28, 0.85)'
+  roundedRect(ctx, -7, -6, 11, 12, 3)
   ctx.fill()
-  ctx.fillStyle = 'rgba(253, 230, 138, 0.6)'
-  ctx.fillRect(17, -6, 2, 3)
-  ctx.fillRect(17, 3, 2, 3)
+  ctx.fillStyle = '#0f172a'
+  ctx.fillRect(-20, -9, 3, 18)
+  ctx.fillStyle = '#e0f2fe'
+  ctx.fillRect(17, -5, 2, 3)
+  ctx.fillRect(17, 2, 2, 3)
   ctx.restore()
 }
 
@@ -327,6 +355,231 @@ function drawStreetlights(ctx, lights) {
   }
 }
 
+// Houses replace office towers on residential blocks. The gable ridge and
+// dormers are what make a rectangle read as a house from directly above.
+function drawHouse(ctx, house) {
+  const roof = PALETTE.houseRoof[house.tone % PALETTE.houseRoof.length]
+  const cx = house.x + house.w / 2
+  const cy = house.y + house.h / 2
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+  ctx.fillRect(house.x + 4, house.y + 5, house.w, house.h)
+
+  const surface = ctx.createLinearGradient(house.x, house.y, house.x + house.w, house.y + house.h)
+  surface.addColorStop(0, shade(roof, 0.26))
+  surface.addColorStop(1, shade(roof, -0.3))
+  roundedRect(ctx, house.x, house.y, house.w, house.h, 2)
+  ctx.fillStyle = surface
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  if (house.w >= house.h) {
+    ctx.moveTo(house.x + 3, cy)
+    ctx.lineTo(house.x + house.w - 3, cy)
+  } else {
+    ctx.moveTo(cx, house.y + 3)
+    ctx.lineTo(cx, house.y + house.h - 3)
+  }
+  ctx.stroke()
+
+  ctx.fillStyle = 'rgba(226, 232, 240, 0.5)'
+  if (house.w >= house.h) {
+    ctx.fillRect(cx - 6, cy - 9, 12, 5)
+    ctx.fillRect(cx - 6, cy + 4, 12, 5)
+  } else {
+    ctx.fillRect(cx - 9, cy - 6, 5, 12)
+    ctx.fillRect(cx + 4, cy - 6, 5, 12)
+  }
+  ctx.fillStyle = '#57534e'
+  ctx.fillRect(house.x + house.w * 0.2, house.y + house.h * 0.18, 7, 7)
+
+  // Front step and a sliver of driveway on the yard-facing edge.
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.75)'
+  ctx.fillRect(cx - 5, house.y + house.h - 4, 10, 4)
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.45)'
+  ctx.fillRect(cx - 7, house.y + house.h, 14, 5)
+}
+
+function drawConvenienceStore(ctx, building) {
+  const { x, y, w, h } = building
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.48)'
+  ctx.fillRect(x + 6, y + 7, w, h)
+
+  const wall = ctx.createLinearGradient(x, y, x + w, y + h)
+  wall.addColorStop(0, '#e2e8f0')
+  wall.addColorStop(1, '#94a3b8')
+  roundedRect(ctx, x, y, w, h, 3)
+  ctx.fillStyle = wall
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  // Rooftop unit and a bright storefront with sliding doors.
+  ctx.fillStyle = '#64748b'
+  ctx.fillRect(x + 8, y + 8, w - 16, 10)
+  ctx.fillStyle = '#cbd5e1'
+  ctx.fillRect(x + 10, y + 10, 12, 6)
+
+  const glassY = y + h - 26
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.88)'
+  ctx.fillRect(x + 6, glassY, w - 12, 22)
+  ctx.fillStyle = 'rgba(125, 211, 252, 0.42)'
+  ctx.fillRect(x + 8, glassY + 2, w - 16, 12)
+  ctx.fillStyle = 'rgba(226, 232, 240, 0.4)'
+  ctx.fillRect(x + w * 0.26, glassY + 2, 12, 18)
+  ctx.fillRect(x + w * 0.66, glassY + 2, 12, 18)
+
+  const signY = glassY - 14
+  const stripeWidth = (w - 12) / PALETTE.storeStripe.length
+  PALETTE.storeStripe.forEach((color, index) => {
+    ctx.fillStyle = color
+    ctx.fillRect(x + 6 + index * stripeWidth, signY, stripeWidth, 12)
+  })
+
+  const logoX = x + w / 2
+  ctx.fillStyle = '#f8fafc'
+  roundedRect(ctx, logoX - 20, signY - 7, 40, 25, 4)
+  ctx.fill()
+  ctx.textAlign = 'center'
+  ctx.font = '900 19px ui-monospace, monospace'
+  ctx.fillStyle = PALETTE.storeStripe[0]
+  ctx.fillText('7', logoX - 9, signY + 12)
+  ctx.fillStyle = PALETTE.storeStripe[1]
+  ctx.fillText('11', logoX + 8, signY + 12)
+}
+
+function drawHospital(ctx, building) {
+  drawBuilding(ctx, building)
+
+  const cx = building.x + building.w / 2
+  const cy = building.y + building.h / 2
+  const radius = Math.min(building.w, building.h) * 0.26
+  ctx.fillStyle = '#cbd5e1'
+  ctx.beginPath()
+  ctx.arc(cx, cy, radius + 5, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#1e293b'
+  ctx.beginPath()
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(248, 250, 252, 0.85)'
+  ctx.lineWidth = 2
+  ctx.stroke()
+  ctx.fillStyle = '#f8fafc'
+  ctx.font = '900 22px ui-monospace, monospace'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText('H', cx, cy + 1)
+  ctx.textBaseline = 'alphabetic'
+
+  const crossX = building.x + 24
+  const crossY = building.y + 22
+  ctx.fillStyle = '#ef4444'
+  ctx.fillRect(crossX - 4, crossY - 11, 8, 22)
+  ctx.fillRect(crossX - 11, crossY - 4, 22, 8)
+
+  // Ambulance bay and the ambulance waiting at its road-facing edge.
+  const bayY = building.y + building.h - 7
+  ctx.fillStyle = '#0f172a'
+  ctx.fillRect(cx - 28, bayY, 56, 7)
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.55)'
+  ctx.fillRect(cx - 26, bayY + 2, 52, 3)
+
+  const ambulanceY = bayY + 2
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
+  roundedRect(ctx, cx - 17, ambulanceY - 8, 36, 17, 4)
+  ctx.fill()
+  ctx.fillStyle = '#f8fafc'
+  roundedRect(ctx, cx - 19, ambulanceY - 10, 38, 18, 4)
+  ctx.fill()
+  ctx.fillStyle = '#ef4444'
+  ctx.fillRect(cx - 19, ambulanceY - 2, 38, 4)
+  ctx.fillStyle = '#38bdf8'
+  ctx.fillRect(cx + 7, ambulanceY - 8, 8, 6)
+}
+
+function drawPlayground(ctx, area) {
+  const { x, y, size } = area
+  const px = x + 10
+  const py = y + 10
+  const span = size - 20
+
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.55)'
+  ctx.lineWidth = 2
+  ctx.strokeRect(px, py, span, span)
+
+  ctx.fillStyle = PALETTE.playground[0]
+  roundedRect(ctx, px + 4, py + 4, span - 8, span * 0.44, 12)
+  ctx.fill()
+  ctx.fillStyle = PALETTE.playground[1]
+  roundedRect(ctx, px + 4, py + span * 0.5, span * 0.44, span * 0.44, 12)
+  ctx.fill()
+  ctx.fillStyle = PALETTE.playground[2]
+  roundedRect(ctx, px + span * 0.52, py + span * 0.5, span * 0.44, span * 0.44, 12)
+  ctx.fill()
+
+  // Swings: an A-frame with two seats.
+  const swingX = px + span * 0.24
+  const swingY = py + span * 0.22
+  ctx.strokeStyle = '#e2e8f0'
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  ctx.moveTo(swingX - 18, swingY + 14)
+  ctx.lineTo(swingX, swingY - 14)
+  ctx.lineTo(swingX + 18, swingY + 14)
+  ctx.moveTo(swingX - 18, swingY + 14)
+  ctx.lineTo(swingX + 18, swingY + 14)
+  ctx.stroke()
+  for (const offset of [-9, 9]) {
+    ctx.strokeStyle = '#94a3b8'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.moveTo(swingX + offset, swingY)
+    ctx.lineTo(swingX + offset, swingY + 17)
+    ctx.stroke()
+    ctx.fillStyle = offset < 0 ? '#f43f5e' : '#facc15'
+    ctx.fillRect(swingX + offset - 5, swingY + 17, 10, 3)
+  }
+
+  // Slide: platform, ladder and a bright chute.
+  const slideX = px + span * 0.62
+  const slideY = py + span * 0.14
+  ctx.strokeStyle = '#38bdf8'
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  ctx.moveTo(slideX, slideY)
+  ctx.lineTo(slideX + 26, slideY + 5)
+  ctx.moveTo(slideX + 3, slideY + 2)
+  ctx.lineTo(slideX + 3, slideY + 24)
+  ctx.moveTo(slideX + 13, slideY + 2)
+  ctx.lineTo(slideX + 13, slideY + 24)
+  ctx.stroke()
+  ctx.fillStyle = '#fbbf24'
+  ctx.beginPath()
+  ctx.moveTo(slideX + 26, slideY + 3)
+  ctx.lineTo(slideX + 40, slideY + 32)
+  ctx.lineTo(slideX + 30, slideY + 32)
+  ctx.lineTo(slideX + 18, slideY + 7)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.fillStyle = '#fde68a'
+  roundedRect(ctx, px + span * 0.55, py + span * 0.58, span * 0.3, span * 0.28, 8)
+  ctx.fill()
+  ctx.fillStyle = '#a855f7'
+  ctx.beginPath()
+  ctx.arc(px + span * 0.24, py + span * 0.74, Math.max(10, span * 0.12), 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#a3e635'
+  ctx.fillRect(px + span * 0.06, py + span * 0.58, 5, 22)
+}
+
 // The city is static: build it once into an offscreen canvas and blit it every
 // frame. This affords much more detail than redrawing every rectangle at 60 FPS.
 export function createCityCanvas(world) {
@@ -340,7 +593,13 @@ export function createCityCanvas(world) {
   drawBlockBases(ctx, world)
   drawRoadStrip(ctx, world, noise)
   drawIntersections(ctx, world, noise)
-  for (const building of world.buildings) drawBuilding(ctx, building)
+  for (const building of world.buildings) {
+    if (building.kind === 'house') drawHouse(ctx, building)
+    else if (building.kind === 'store') drawConvenienceStore(ctx, building)
+    else if (building.kind === 'hospital') drawHospital(ctx, building)
+    else drawBuilding(ctx, building)
+  }
+  for (const area of world.playgrounds || []) drawPlayground(ctx, area)
   for (const tree of world.trees) drawTree(ctx, tree)
   for (const car of world.parkedCars) drawParkedCar(ctx, car)
   drawStreetlights(ctx, world.streetlights)
@@ -375,24 +634,42 @@ function drawWheel(ctx, x, y, steer = 0) {
   ctx.save()
   ctx.translate(x, y)
   ctx.rotate(steer)
-  ctx.fillStyle = '#080d14'
-  roundedRect(ctx, -5, -3, 10, 6, 2)
+  ctx.fillStyle = '#070b12'
+  roundedRect(ctx, -6, -3.5, 12, 7, 2)
   ctx.fill()
-  ctx.fillStyle = '#64748b'
-  ctx.fillRect(-2, -1.8, 3.5, 3.6)
+  ctx.fillStyle = '#334155'
+  ctx.beginPath()
+  ctx.ellipse(0, 0, 4, 2.8, 0, 0, Math.PI * 2)
+  ctx.fill()
+  // Cross-spokes and a bright caliper read as performance brakes from above.
+  ctx.strokeStyle = 'rgba(226, 232, 240, 0.75)'
+  ctx.lineWidth = 0.9
+  ctx.beginPath()
+  ctx.moveTo(-3, 0)
+  ctx.lineTo(3, 0)
+  ctx.moveTo(0, -2.4)
+  ctx.lineTo(0, 2.4)
+  ctx.stroke()
+  ctx.fillStyle = '#f97316'
+  ctx.fillRect(-3.4, -1, 1.3, 2)
   ctx.restore()
 }
 
 function carBodyPath(ctx) {
+  // Wide haunches at the back, a long wedge hood and a pointed nose.
   ctx.beginPath()
-  ctx.moveTo(-19, -11)
-  ctx.quadraticCurveTo(-22, -11, -22, -7)
-  ctx.lineTo(-22, 7)
-  ctx.quadraticCurveTo(-22, 11, -19, 11)
-  ctx.lineTo(10, 11)
-  ctx.quadraticCurveTo(20, 11, 22, 6)
-  ctx.quadraticCurveTo(23, 0, 22, -6)
-  ctx.quadraticCurveTo(20, -11, 10, -11)
+  ctx.moveTo(-22, -10)
+  ctx.lineTo(-22, 10)
+  ctx.quadraticCurveTo(-18, 12, -8, 12)
+  ctx.lineTo(2, 12)
+  ctx.quadraticCurveTo(8, 11, 11, 9)
+  ctx.lineTo(20, 6)
+  ctx.quadraticCurveTo(24, 3, 24, 0)
+  ctx.quadraticCurveTo(24, -3, 20, -6)
+  ctx.lineTo(11, -9)
+  ctx.quadraticCurveTo(8, -11, 2, -12)
+  ctx.lineTo(-8, -12)
+  ctx.quadraticCurveTo(-18, -12, -22, -10)
   ctx.closePath()
 }
 
@@ -400,15 +677,16 @@ function drawHeadlights(ctx, car) {
   ctx.save()
   ctx.translate(car.x, car.y)
   ctx.rotate(car.angle)
-  const beam = ctx.createLinearGradient(18, 0, 165, 0)
-  beam.addColorStop(0, 'rgba(254, 243, 199, 0.3)')
-  beam.addColorStop(1, 'rgba(254, 243, 199, 0)')
+  // Cool LED beams instead of the old warm halogens.
+  const beam = ctx.createLinearGradient(22, 0, 170, 0)
+  beam.addColorStop(0, 'rgba(224, 242, 254, 0.34)')
+  beam.addColorStop(1, 'rgba(224, 242, 254, 0)')
   ctx.fillStyle = beam
   ctx.beginPath()
-  ctx.moveTo(18, -8)
-  ctx.lineTo(165, -58)
-  ctx.lineTo(165, 58)
-  ctx.lineTo(18, 8)
+  ctx.moveTo(21, -7)
+  ctx.lineTo(170, -52)
+  ctx.lineTo(170, 52)
+  ctx.lineTo(21, 7)
   ctx.closePath()
   ctx.fill()
   ctx.restore()
@@ -420,123 +698,177 @@ function drawCar(ctx, car, isSelf = false) {
   ctx.save()
   ctx.translate(car.x, car.y)
   ctx.rotate(car.angle)
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.48)'
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
   ctx.beginPath()
-  ctx.ellipse(-1, 3, 24, 13, 0, 0, Math.PI * 2)
+  ctx.ellipse(-1, 3, 26, 14, 0, 0, Math.PI * 2)
   ctx.fill()
 
   if (car.isIt) {
-    const aura = ctx.createRadialGradient(0, 0, 12, 0, 0, 40)
+    const aura = ctx.createRadialGradient(0, 0, 14, 0, 0, 46)
     aura.addColorStop(0, 'rgba(248, 113, 113, 0.38)')
     aura.addColorStop(1, 'rgba(248, 113, 113, 0)')
     ctx.fillStyle = aura
     ctx.beginPath()
-    ctx.arc(0, 0, 40, 0, Math.PI * 2)
+    ctx.arc(0, 0, 46, 0, Math.PI * 2)
     ctx.fill()
   }
 
   const steer = (car.steer || 0) * 0.42
-  drawWheel(ctx, 12, -11, steer)
-  drawWheel(ctx, 12, 11, steer)
-  drawWheel(ctx, -13, -11)
-  drawWheel(ctx, -13, 11)
+  drawWheel(ctx, 13, -12.5, steer)
+  drawWheel(ctx, 13, 12.5, steer)
+  drawWheel(ctx, -14, -12.5)
+  drawWheel(ctx, -14, 12.5)
 
   ctx.translate(0, (car.roll || 0) * 1.6)
 
+  // Carbon splitter and diffuser peek out from under the low bodywork.
+  ctx.fillStyle = '#0b1120'
+  ctx.fillRect(20, -10, 5, 20)
+  ctx.fillRect(-23, -9, 4, 18)
+
   const paint = ctx.createLinearGradient(0, -12, 0, 12)
-  paint.addColorStop(0, shade(car.color, 0.3))
-  paint.addColorStop(0.45, car.color)
-  paint.addColorStop(1, shade(car.color, -0.38))
+  paint.addColorStop(0, shade(car.color, 0.38))
+  paint.addColorStop(0.42, car.color)
+  paint.addColorStop(1, shade(car.color, -0.45))
   carBodyPath(ctx)
   ctx.fillStyle = paint
   ctx.fill()
-  ctx.strokeStyle = 'rgba(2, 6, 23, 0.65)'
+  ctx.strokeStyle = 'rgba(2, 6, 23, 0.7)'
   ctx.lineWidth = 1
   ctx.stroke()
 
-  // Hood highlight and panel seams.
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.12)'
+  // Hood vents, power bulge and twin racing stripes.
+  ctx.fillStyle = 'rgba(8, 15, 25, 0.55)'
   ctx.beginPath()
-  ctx.moveTo(9, -9)
-  ctx.lineTo(19, -7)
-  ctx.lineTo(19, 7)
-  ctx.lineTo(9, 9)
+  ctx.moveTo(11, -8)
+  ctx.lineTo(16, -6)
+  ctx.lineTo(16, -4)
+  ctx.lineTo(11, -5)
   ctx.closePath()
   ctx.fill()
-  ctx.strokeStyle = 'rgba(2, 6, 23, 0.45)'
   ctx.beginPath()
-  ctx.moveTo(-9, -10)
-  ctx.lineTo(-9, 10)
-  ctx.moveTo(8, -10)
-  ctx.lineTo(8, 10)
-  ctx.stroke()
-
-  // Cabin with windshield, rear glass and pillars.
-  const glass = ctx.createLinearGradient(0, -8, 0, 8)
-  glass.addColorStop(0, 'rgba(186, 230, 253, 0.72)')
-  glass.addColorStop(0.5, 'rgba(30, 58, 92, 0.92)')
-  glass.addColorStop(1, 'rgba(15, 23, 42, 0.95)')
-  ctx.fillStyle = 'rgba(8, 15, 25, 0.9)'
-  roundedRect(ctx, -7, -8.5, 15, 17, 3)
+  ctx.moveTo(11, 8)
+  ctx.lineTo(16, 6)
+  ctx.lineTo(16, 4)
+  ctx.lineTo(11, 5)
+  ctx.closePath()
   ctx.fill()
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.16)'
+  ctx.fillRect(10, -2, 10, 1.5)
+  ctx.fillRect(10, 0.5, 10, 1.5)
+
+  // Side air intakes just behind the front wheels.
+  ctx.fillStyle = 'rgba(8, 15, 25, 0.65)'
+  ctx.beginPath()
+  ctx.moveTo(-2, -12)
+  ctx.lineTo(4, -11)
+  ctx.lineTo(3, -9)
+  ctx.lineTo(-2, -10)
+  ctx.closePath()
+  ctx.fill()
+  ctx.beginPath()
+  ctx.moveTo(-2, 12)
+  ctx.lineTo(4, 11)
+  ctx.lineTo(3, 9)
+  ctx.lineTo(-2, 10)
+  ctx.closePath()
+  ctx.fill()
+
+  // Panoramic glass canopy with a carbon spine and a lit windshield.
+  const glass = ctx.createLinearGradient(0, -9, 0, 9)
+  glass.addColorStop(0, 'rgba(186, 230, 253, 0.82)')
+  glass.addColorStop(0.45, 'rgba(30, 58, 92, 0.94)')
+  glass.addColorStop(1, 'rgba(15, 23, 42, 0.96)')
+  ctx.beginPath()
+  ctx.moveTo(-9, -7)
+  ctx.quadraticCurveTo(-6, -9.5, 0, -9)
+  ctx.lineTo(8, -6)
+  ctx.quadraticCurveTo(10, 0, 8, 6)
+  ctx.lineTo(0, 9)
+  ctx.quadraticCurveTo(-6, 9.5, -9, 7)
+  ctx.quadraticCurveTo(-11, 0, -9, -7)
+  ctx.closePath()
   ctx.fillStyle = glass
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(2, 6, 23, 0.85)'
+  ctx.lineWidth = 1.4
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(125, 211, 252, 0.35)'
   ctx.beginPath()
-  ctx.moveTo(2, -7.5)
-  ctx.lineTo(7, -5.5)
-  ctx.lineTo(7, 5.5)
-  ctx.lineTo(2, 7.5)
+  ctx.moveTo(4, -6)
+  ctx.lineTo(8, -5)
+  ctx.lineTo(8, 5)
+  ctx.lineTo(4, 6)
   ctx.closePath()
   ctx.fill()
-  ctx.fillStyle = 'rgba(71, 107, 140, 0.85)'
-  ctx.fillRect(-6, -7, 4, 14)
-  ctx.strokeStyle = 'rgba(2, 6, 23, 0.8)'
+  ctx.fillStyle = shade(car.color, -0.25)
+  ctx.fillRect(-1.6, -8.5, 3.2, 17)
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)'
+  ctx.lineWidth = 0.8
   ctx.beginPath()
-  ctx.moveTo(-1.5, -8)
-  ctx.lineTo(-1.5, 8)
+  ctx.moveTo(-8, 0)
+  ctx.lineTo(-3, 0)
   ctx.stroke()
 
-  // Mirrors, handles, grille.
-  ctx.fillStyle = shade(car.color, -0.15)
-  ctx.fillRect(7, -14, 4, 3)
-  ctx.fillRect(7, 11, 4, 3)
-  ctx.fillStyle = 'rgba(226, 232, 240, 0.7)'
-  ctx.fillRect(-4, -8, 3, 1.5)
-  ctx.fillRect(-4, 6.5, 3, 1.5)
-  ctx.fillStyle = 'rgba(10, 15, 23, 0.9)'
-  ctx.fillRect(21, -5, 2, 10)
+  // Mirrors on short stalks.
+  ctx.fillStyle = shade(car.color, -0.1)
+  roundedRect(ctx, 2, -14, 5, 3, 1)
+  ctx.fill()
+  roundedRect(ctx, 2, 11, 5, 3, 1)
+  ctx.fill()
 
-  // Headlights with a small local glow.
+  // Rear wing: a wide carbon blade with endplates and pylons.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+  ctx.fillRect(-25, -14, 6, 30)
+  ctx.fillStyle = '#0f172a'
+  ctx.fillRect(-25, -14, 5, 28)
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.55)'
+  ctx.fillRect(-24.5, -13.5, 4, 27)
+  ctx.fillStyle = '#020617'
+  ctx.fillRect(-25, -15.5, 6, 2.5)
+  ctx.fillRect(-25, 13, 6, 2.5)
+  ctx.fillStyle = '#334155'
+  ctx.fillRect(-21, -8, 2, 4)
+  ctx.fillRect(-21, 4, 2, 4)
+
+  // Thin LED headlights with a local cool glow.
   for (const side of [-1, 1]) {
     const y = side * 6.5
-    const glow = ctx.createRadialGradient(21, y, 0, 21, y, 8)
-    glow.addColorStop(0, 'rgba(254, 243, 199, 0.85)')
-    glow.addColorStop(1, 'rgba(254, 243, 199, 0)')
+    const glow = ctx.createRadialGradient(21, y, 0, 21, y, 10)
+    glow.addColorStop(0, 'rgba(224, 242, 254, 0.9)')
+    glow.addColorStop(1, 'rgba(224, 242, 254, 0)')
     ctx.fillStyle = glow
     ctx.beginPath()
-    ctx.arc(21, y, 8, 0, Math.PI * 2)
+    ctx.arc(21, y, 10, 0, Math.PI * 2)
     ctx.fill()
-    ctx.fillStyle = '#fef9c3'
-    ctx.fillRect(19, y - 2, 3, 4)
+    ctx.fillStyle = '#e0f2fe'
+    ctx.beginPath()
+    ctx.moveTo(18, y - 2)
+    ctx.lineTo(23, y - 1)
+    ctx.lineTo(23, y + 1)
+    ctx.lineTo(18, y + 2)
+    ctx.closePath()
+    ctx.fill()
   }
 
-  // Taillights brighten while braking or reversing.
-  const tailAlpha = car.braking ? 1 : 0.7
+  // Full-width LED tail bar brightens while braking or reversing.
+  const tailAlpha = car.braking ? 1 : 0.72
   ctx.fillStyle = `rgba(248, 113, 113, ${tailAlpha})`
-  ctx.fillRect(-22, -9, 3, 4)
-  ctx.fillRect(-22, 5, 3, 4)
-  ctx.fillStyle = 'rgba(226, 232, 240, 0.75)'
-  ctx.fillRect(-17, -3.5, 4, 7)
+  ctx.fillRect(-20, -10, 3.5, 6)
+  ctx.fillRect(-20, 4, 3.5, 6)
+  ctx.fillStyle = `rgba(248, 113, 113, ${tailAlpha * 0.5})`
+  ctx.fillRect(-20, -3, 3.5, 6)
 
   if (isSelf) {
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)'
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'
     ctx.lineWidth = 1.5
-    roundedRect(ctx, -24, -14, 48, 28, 9)
+    roundedRect(ctx, -27, -17, 53, 34, 10)
     ctx.stroke()
   }
   if (car.isIt) {
     ctx.strokeStyle = 'rgba(251, 146, 60, 0.95)'
     ctx.lineWidth = 2.5
-    roundedRect(ctx, -27, -17, 54, 34, 11)
+    roundedRect(ctx, -30, -20, 58, 40, 12)
     ctx.stroke()
   }
 
@@ -544,10 +876,10 @@ function drawCar(ctx, car, isSelf = false) {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)'
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(-14, -11)
-    ctx.lineTo(-10, 11)
-    ctx.moveTo(-9, -11)
-    ctx.lineTo(-5, 11)
+    ctx.moveTo(-16, -12)
+    ctx.lineTo(-12, 12)
+    ctx.moveTo(-11, -12)
+    ctx.lineTo(-7, 12)
     ctx.stroke()
   }
   ctx.restore()
@@ -558,7 +890,7 @@ function drawCar(ctx, car, isSelf = false) {
     ctx.strokeStyle = car.flashColor || '#22d3ee'
     ctx.lineWidth = 3
     ctx.beginPath()
-    ctx.arc(car.x, car.y, 26 + (1 - car.flash) * 34, 0, Math.PI * 2)
+    ctx.arc(car.x, car.y, 30 + (1 - car.flash) * 34, 0, Math.PI * 2)
     ctx.stroke()
     ctx.restore()
   }

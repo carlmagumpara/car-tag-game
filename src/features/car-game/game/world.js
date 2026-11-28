@@ -12,6 +12,16 @@ function mulberry32(seed) {
   }
 }
 
+// Landmarks sit in fixed blocks so they are guaranteed to exist in the same
+// place on every client. Fractions keep them spread out if the grid ever grows.
+function landmarkAt(column, row, columns, rows) {
+  if (column === Math.floor(columns * 0.2) && row === Math.floor(rows * 0.25)) return 'hospital'
+  if (column === Math.floor(columns * 0.7) && row === Math.floor(rows * 0.25)) return 'store'
+  if (column === Math.floor(columns * 0.4) && row === Math.floor(rows * 0.625)) return 'playground'
+  if (column === Math.floor(columns * 0.8) && row === Math.floor(rows * 0.75)) return 'playground'
+  return null
+}
+
 export function createWorld(seed = 20261127) {
   const random = mulberry32(seed)
   const halfRoad = WORLD.roadWidth / 2
@@ -19,6 +29,7 @@ export function createWorld(seed = 20261127) {
   const buildings = []
   const trees = []
   const parkedCars = []
+  const playgrounds = []
   const streetlights = []
   const columns = Math.round(WORLD.width / WORLD.grid)
   const rows = Math.round(WORLD.height / WORLD.grid)
@@ -29,7 +40,8 @@ export function createWorld(seed = 20261127) {
       const y = row * WORLD.grid + halfRoad + WORLD.sidewalk
       const size = WORLD.grid - WORLD.roadWidth - WORLD.sidewalk * 2
       const roll = random()
-      const type = roll < 0.13 ? 'park' : roll < 0.23 ? 'lot' : 'built'
+      const type = landmarkAt(column, row, columns, rows)
+        ?? (roll < 0.13 ? 'park' : roll < 0.25 ? 'lot' : roll < 0.6 ? 'houses' : 'built')
       const block = {
         x,
         y,
@@ -55,6 +67,11 @@ export function createWorld(seed = 20261127) {
         continue
       }
 
+      if (type === 'playground') {
+        playgrounds.push({ x, y, size, seed: block.seed })
+        continue
+      }
+
       if (type === 'lot') {
         // A small strip mall on one edge, parking bays in front of it.
         buildings.push({
@@ -64,6 +81,7 @@ export function createWorld(seed = 20261127) {
           h: 42 + random() * 18,
           tone: Math.floor(random() * 4),
           seed: Math.floor(random() * 1000),
+          kind: 'built',
           shop: true,
         })
         const stallWidth = 26
@@ -75,6 +93,73 @@ export function createWorld(seed = 20261127) {
               y: y + size - 34 - random() * 12,
               angle: Math.PI,
               color: ['#475569', '#7f1d1d', '#1e3a5f', '#78350f', '#3f3f46'][Math.floor(random() * 5)],
+            })
+          }
+        }
+        continue
+      }
+
+      if (type === 'hospital') {
+        buildings.push({
+          x: x + 6,
+          y: y + 6,
+          w: size - 12,
+          h: size - 12,
+          tone: Math.floor(random() * 2),
+          seed: Math.floor(random() * 1000),
+          kind: 'hospital',
+        })
+        continue
+      }
+
+      if (type === 'store') {
+        const storeHeight = Math.round(size * 0.56)
+        buildings.push({
+          x: x + 6,
+          y: y + 6,
+          w: size - 12,
+          h: storeHeight,
+          tone: Math.floor(random() * 4),
+          seed: Math.floor(random() * 1000),
+          kind: 'store',
+        })
+        for (let i = 0; i < 3; i += 1) {
+          if (random() > 0.25) {
+            parkedCars.push({
+              x: x + 26 + i * 40,
+              y: y + size - 20,
+              angle: Math.PI,
+              color: ['#475569', '#7f1d1d', '#1e3a5f', '#3f3f46'][Math.floor(random() * 4)],
+            })
+          }
+        }
+        continue
+      }
+
+      if (type === 'houses') {
+        const gap = 10
+        const lotSize = (size - gap) / 2
+        for (let ly = 0; ly < 2; ly += 1) {
+          for (let lx = 0; lx < 2; lx += 1) {
+            const inset = 8 + random() * 8
+            buildings.push({
+              x: x + lx * (lotSize + gap) + inset,
+              y: y + ly * (lotSize + gap) + inset,
+              w: lotSize - inset * 2,
+              h: lotSize - inset * 2,
+              tone: Math.floor(random() * 5),
+              seed: Math.floor(random() * 1000),
+              kind: 'house',
+            })
+          }
+        }
+        for (const [treeX, treeY] of [[x + 14, y + 14], [x + size - 14, y + size - 14]]) {
+          if (random() < 0.65) {
+            trees.push({
+              x: treeX,
+              y: treeY,
+              radius: 7 + random() * 4,
+              tone: Math.floor(random() * 3),
             })
           }
         }
@@ -115,6 +200,7 @@ export function createWorld(seed = 20261127) {
             seed: Math.floor(random() * 1000),
             floors: 1 + Math.floor(random() * 4),
             shop: random() < 0.25,
+            kind: 'built',
           })
         }
       }
@@ -140,6 +226,7 @@ export function createWorld(seed = 20261127) {
     buildings,
     trees,
     parkedCars,
+    playgrounds,
     streetlights,
     roadsX: Array.from({ length: columns + 1 }, (_, i) => i * WORLD.grid),
     roadsY: Array.from({ length: rows + 1 }, (_, i) => i * WORLD.grid),

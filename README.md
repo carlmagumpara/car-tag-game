@@ -50,7 +50,8 @@ are deleted so their codes can be reused. A bare `/#/game` URL gets a freshly ge
   round and tags only count while the timer is running; `game:state` broadcasts the phase,
   seconds left, ready drivers and the final standings.
 - The city is generated from a **fixed seed** (`game/world.js`), so every client and the
-  server calculate the same roads, buildings and spawn points without sending map data.
+  server calculate the same roads, houses, shops, playgrounds, hospital and spawn points
+  without sending map data.
 - React state is used only for UI (connection status, roster, HUD text, chat). The animation loop
   touches refs, never React state.
 - **Chat** is ephemeral: `chat:send` is validated and rate-limited server-side, then broadcast as
@@ -88,7 +89,7 @@ src/
     game/player-name.js                random name + name normalization
     game/voice-config.js               build-time STUN configuration
     game/constants.js                  physics/network/world tuning
-    game/world.js                      seeded city, spawn points, clamping
+    game/world.js                      seeded city, landmark blocks, spawn points, clamping
     game/physics.js                    pure vehicle physics and collisions
     game/input.js                      key mapping, axis derivation (pure)
     game/interpolation.js              remote snapshot buffering (pure)
@@ -136,8 +137,10 @@ _tmp/                                  scratch verification scripts (gitignored)
 - Voice uses a public STUN server by default. Override it with `VITE_VOICE_STUN_URL` (a public
   value, not a secret). Without TURN, drivers behind symmetric NAT may not connect.
 - The dusk city is drawn once into an offscreen canvas at startup (textured asphalt,
-  crosswalks, sidewalks, lit windows, roof equipment, parks, streetlights and parked cars)
-  and blitted each frame; only cars, lights, skids and particles redraw dynamically.
+  crosswalks, sidewalks, lit windows, roof equipment, parks, houses, a 7/11 store,
+  playgrounds, a hospital, streetlights and parked cars) and blitted each frame; only cars,
+  lights, skids and particles redraw dynamically. Wider roads leave room for two cars to
+  pass, and landmark blocks keep the same recognizable places on every client.
 - Device pixel ratio is capped at 2 to avoid rendering 3x/4x pixel buffers on phones.
 - Skid marks and dust particles use capped buffers and in-place compaction; no array
   filtering happens in the render loop.
