@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import AiGame from './features/car-game/AiGame.jsx'
 import CarGame from './features/car-game/CarGame.jsx'
 import NameField from './features/car-game/components/NameField.jsx'
 import NameGate from './features/car-game/components/NameGate.jsx'
@@ -13,6 +14,7 @@ import { createRoomId, normalizeRoomId } from './features/car-game/game/room-id.
 
 function parseRoute() {
   const path = window.location.hash.replace(/^#/, '') || '/'
+  if (path === '/ai') return { view: 'ai', roomId: null }
   if (path === '/game') return { view: 'game', roomId: null }
   const match = path.match(/^\/game\/([^/]+)$/)
   if (match) return { view: 'game', roomId: match[1] }
@@ -66,10 +68,63 @@ function ColorPicker({ color, onSelect }) {
   )
 }
 
-function Landing({ onPlay, onJoin, carColor, onSelectColor, initialName }) {
+const MODES = Object.freeze([
+  {
+    id: 'multiplayer',
+    icon: '👥',
+    title: 'Multiplayer',
+    body: 'Create a private room and play tag with your friends in real time.',
+  },
+  {
+    id: 'ai',
+    icon: '🤖',
+    title: 'You vs AI',
+    body: 'Drive against a computer rival right here — no room code or server needed.',
+  },
+])
+
+function ModePicker({ mode, onChange }) {
+  return (
+    <section className="mt-10 max-w-2xl" aria-label="Game mode">
+      <h2 className="font-mono text-xs uppercase tracking-[0.25em] text-slate-500">Choose a mode</h2>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {MODES.map((option) => {
+          const active = option.id === mode
+          return (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onChange(option.id)}
+              className={`rounded-2xl border p-4 text-left transition ${
+                active
+                  ? 'border-cyan-400/60 bg-cyan-500/10 shadow-lg shadow-cyan-500/10'
+                  : 'border-white/10 bg-white/[0.03] hover:border-white/30'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-xl" aria-hidden="true">{option.icon}</span>
+                <span className="font-semibold text-white">{option.title}</span>
+                {active && (
+                  <span className="ml-auto font-mono text-[10px] uppercase tracking-widest text-cyan-300">
+                    Selected
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-sm leading-relaxed text-slate-400">{option.body}</p>
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function Landing({ onPlay, onPlayAi, onJoin, carColor, onSelectColor, initialName }) {
   const [code, setCode] = useState('')
   const [nameDraft, setNameDraft] = useState(initialName || '')
   const [invalid, setInvalid] = useState(false)
+  const [mode, setMode] = useState('multiplayer')
   const name = normalizePlayerName(nameDraft)
 
   const submit = (event) => {
@@ -94,7 +149,7 @@ function Landing({ onPlay, onJoin, carColor, onSelectColor, initialName }) {
           NEON DRIVE
         </div>
         <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 font-mono text-[10px] uppercase tracking-widest text-emerald-300">
-          Live multiplayer
+          Multiplayer + AI
         </span>
       </header>
 
@@ -122,51 +177,71 @@ function Landing({ onPlay, onJoin, carColor, onSelectColor, initialName }) {
           />
           {!name && (
             <p className="mt-2 font-mono text-[11px] text-amber-300">
-              Type a name or click Random before you join.
+              Type a name or click Random before you play.
             </p>
           )}
         </div>
 
-        <div className="mt-8 flex flex-wrap items-center gap-4">
-          <button
-            type="button"
-            onClick={() => onPlay(name)}
-            disabled={!name}
-            className="rounded-xl bg-cyan-400 px-7 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Create a room →
-          </button>
-          <span className="font-mono text-xs text-slate-500">WASD / arrows to drive · Space to drift</span>
-        </div>
+        <ModePicker mode={mode} onChange={setMode} />
 
-        <form onSubmit={submit} className="mt-6 flex flex-wrap items-center gap-3">
-          <label htmlFor="room-code" className="font-mono text-xs uppercase tracking-widest text-slate-500">
-            Have a code?
-          </label>
-          <input
-            id="room-code"
-            value={code}
-            onChange={(event) => {
-              setCode(event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, '').slice(0, 6))
-              setInvalid(false)
-            }}
-            placeholder="ABC234"
-            autoComplete="off"
-            spellCheck="false"
-            aria-invalid={invalid}
-            className="w-32 rounded-lg border border-white/15 bg-white/5 px-3 py-2 font-mono text-sm uppercase tracking-[0.2em] text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-400/60"
-          />
-          <button
-            type="submit"
-            disabled={!name}
-            className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 font-mono text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Join room
-          </button>
-          {invalid && (
-            <span className="font-mono text-[11px] text-rose-300">Enter the 6-character room code.</span>
-          )}
-        </form>
+        {mode === 'multiplayer' ? (
+          <>
+            <div className="mt-8 flex flex-wrap items-center gap-4">
+              <button
+                type="button"
+                onClick={() => onPlay(name)}
+                disabled={!name}
+                className="rounded-xl bg-cyan-400 px-7 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Create a room →
+              </button>
+              <span className="font-mono text-xs text-slate-500">WASD / arrows to drive · Space to drift</span>
+            </div>
+
+            <form onSubmit={submit} className="mt-6 flex flex-wrap items-center gap-3">
+              <label htmlFor="room-code" className="font-mono text-xs uppercase tracking-widest text-slate-500">
+                Have a code?
+              </label>
+              <input
+                id="room-code"
+                value={code}
+                onChange={(event) => {
+                  setCode(event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, '').slice(0, 6))
+                  setInvalid(false)
+                }}
+                placeholder="ABC234"
+                autoComplete="off"
+                spellCheck="false"
+                aria-invalid={invalid}
+                className="w-32 rounded-lg border border-white/15 bg-white/5 px-3 py-2 font-mono text-sm uppercase tracking-[0.2em] text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-400/60"
+              />
+              <button
+                type="submit"
+                disabled={!name}
+                className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 font-mono text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Join room
+              </button>
+              {invalid && (
+                <span className="font-mono text-[11px] text-rose-300">Enter the 6-character room code.</span>
+              )}
+            </form>
+          </>
+        ) : (
+          <div className="mt-8 flex flex-wrap items-center gap-4">
+            <button
+              type="button"
+              onClick={() => onPlayAi(name)}
+              disabled={!name}
+              className="rounded-xl bg-fuchsia-500 px-7 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-fuchsia-500/20 transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Play vs AI →
+            </button>
+            <span className="font-mono text-xs text-slate-500">
+              Local match · no room code or second player needed
+            </span>
+          </div>
+        )}
 
         <ColorPicker color={carColor} onSelect={onSelectColor} />
 
@@ -233,6 +308,34 @@ export default function App() {
     }
   }, [route.view, route.roomId, roomId])
 
+  if (route.view === 'ai') {
+    if (!driverName) {
+      return (
+        <NameGate
+          eyebrow="You vs AI"
+          title="One last thing — your name."
+          description="Type a driver name or use a random one. Your AI rival will see it on the scoreboard."
+          actionLabel="Start the race →"
+          initialName={driverName}
+          onChoose={chooseName}
+          onExit={() => {
+            window.location.hash = '/'
+          }}
+        />
+      )
+    }
+    return (
+      <AiGame
+        key="ai"
+        carColor={carColor}
+        driverName={driverName}
+        onExit={() => {
+          window.location.hash = '/'
+        }}
+      />
+    )
+  }
+
   if (route.view === 'game') {
     if (!driverName) {
       return (
@@ -267,6 +370,10 @@ export default function App() {
       onPlay={(name) => {
         chooseName(name)
         window.location.hash = `/game/${createRoomId()}`
+      }}
+      onPlayAi={(name) => {
+        chooseName(name)
+        window.location.hash = '/ai'
       }}
       onJoin={(code, name) => {
         chooseName(name)

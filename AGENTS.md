@@ -29,6 +29,9 @@ and the driver with the most tags when the timer expires wins.
   validates and relays signaling (SDP offers/answers and ICE candidates).
 - All state is **in memory**. Rooms are created on demand, isolated by code, and deleted when
   empty. A server restart clears everything.
+- A second, **client-only mode** — **You vs AI** (`#/ai`) — lets one driver race a local AI rival.
+  It shares the canvas, physics, renderer and tag/round semantics but opens no socket and never
+  calls multiplayer code; see §5 and §11.
 - There are **no user accounts, logins, tokens, or persistent profiles** (see §7).
 
 Deployment targets in this repo: Vercel (static site + Socket.IO function at `/api/game`),
@@ -64,13 +67,15 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │
 ├── src/                           FRONTEND (browser only)
 │   ├── main.jsx                   React StrictMode root
-│   ├── App.jsx                    hash routing (#/game/<CODE>), landing page, car color picker
+│   ├── App.jsx                    hash routing (#/game/<CODE>, #/ai), mode picker, landing, color
 │   ├── index.css                  Tailwind directives + global resets only
 │   └── features/car-game/
-│       ├── CarGame.jsx            composition root: overlays, pause, HUD wiring, copy link
+│       ├── CarGame.jsx            multiplayer composition root: overlays, pause, HUD, copy link
+│       ├── AiGame.jsx             You vs AI composition root: result overlay, restart
 │       ├── GameCanvas.jsx         the single rAF loop, camera, DPR canvas, effects
 │       ├── components/
 │       │   ├── GameHUD.jsx        speed, connection status, room/ready/timer controls
+│       │   ├── AiHUD.jsx          local-match status, score, timer, ready/restart
 │       │   ├── PlayerList.jsx     roster with color swatches and IT/RDY/YOU badges
 │       │   ├── GameControls.jsx   desktop keyboard legend
 │       │   ├── TouchControls.jsx  mobile pointer buttons
@@ -81,8 +86,11 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │       ├── hooks/
 │       │   ├── useKeyboard.js     key state in a ref; blur/visibility cleanup
 │       │   ├── useMultiplayer.js  socket lifecycle, roster, reconnect, chat, send helpers
+│       │   ├── useAiGame.js       local AI match: rival stepping, scoring, restart
 │       │   └── useVoice.js        WebRTC mesh: mic, peers, signaling, cleanup
 │       └── game/                  PURE, DOM-light logic (unit-tested directly by Node)
+│           ├── ai.js              AI steering: chase/flee, obstacle probing, smoothing
+│           ├── ai-match.js        local tag/round rules (mirrors server pure modules)
 │           ├── chat.js            client chat input normalization
 │           ├── player-name.js     random name, normalization, localStorage persistence
 │           ├── voice-config.js    build-time STUN configuration
@@ -166,9 +174,9 @@ Useful scripts (from root unless noted):
 | `npm run dev` | Vite dev server at `http://localhost:5173` |
 | `npm run server` | Standalone game server at `http://localhost:3001` (`GET /health`) |
 | `npm run build` / `npm run preview` | Production build into `dist/` / preview at `:4173` |
-| `npm test` | 43 frontend/node:test suites (`tests/*.test.js`) |
+| `npm test` | 67 frontend/node:test suites (`tests/*.test.js`) |
 | `npm run test:server` | 43 server suites (`server/test/*.test.js`) |
-| `npm run test:all` | both suites (86 tests total at time of writing) |
+| `npm run test:all` | both suites (110 tests total at time of writing) |
 | `cd server && npm run dev` | server with `--watch` auto-restart |
 
 ---
@@ -247,12 +255,17 @@ Useful scripts (from root unless noted):
 | Name choice | local draft in `Landing`/`NameGate`, committed in `App` via `chooseName` | saved on commit; prefilled on later visits/share links |
 | Persistent preference | `localStorage` via `loadCarColor`/`saveCarColor` and `loadPlayerName`/`savePlayerName` | keys `neon-drive:car-color`, `neon-drive:player-name` |
 | Chat history | React `useState` in `useMultiplayer`, capped at 50 | `chat`, `sendChat`; low-frequency, safe for React |
+| AI match (local only) | `useAiGame` refs; no socket | `playerRef`, `aiRef`, `brainRef`, `matchRef`, `playersRef`; AI stepped by `sendMove` at 20 Hz |
 | WebRTC voice | refs in `useVoice`, no React state per frame | `localStreamRef`, `peersRef`, hidden `<audio>` elements |
 
 Rules:
 
 - Do not add a global store (Redux/Zustand/Context) for game data — it would put per-frame
   data into the React render cycle. Follow the existing ref + throttle pattern.
+- AI mode is isolated by construction: `AiGame`/`useAiGame` never call `useMultiplayer`,
+  `useVoice` or `io()`. The rival is stepped from the existing `GameCanvas` loop through its
+  `sendMove` callback (20 Hz), and its snapshot goes through the same interpolation buffer as
+  remote multiplayer cars. Keep it that way — no socket events for AI, no AI logic in server.
 - `localStorage` access is wrapped in `try/catch` and guarded for non-browser environments so
   `node:test` can import these modules; keep that property.
 - The URL code is the client's intent; the server's `game:init` `roomId` wins for the share link
@@ -392,9 +405,11 @@ route — `/api/game/health` is **not** routed).
   (e.g. `globalThis.window` in `room-id.test.js`) must be cleaned up in `finally`.
 - Add or update tests whenever you change pure logic, protocol payloads, or duplicated
   constants. Prefer extending the relevant existing suite over creating a new framework.
+  AI steering lives in `tests/ai.test.js` and local scoring in `tests/ai-match.test.js`;
+  both import pure modules directly under Node, like the rest of the frontend suites.
 - Verify with:
   ```bash
-  npm run test:all        # 43 frontend + 43 server tests
+  npm run test:all        # 67 frontend + 43 server tests
   npm run build           # production build must succeed
   ```
 - Manual verification lives in `_tmp/*.mjs` scratch Playwright scripts (two isolated browser
@@ -460,6 +475,8 @@ route — `/api/game/health` is **not** routed).
   WebRTC mesh in this project; changing that needs a new service and approval.
 - Add persistent chat history or moderation features without agreement on storage and policy.
 - Import server code into the browser bundle or browser APIs into `server/src`.
+- Add AI state or scoring to the Socket.IO protocol, the server, or shared multiplayer modules —
+  `ai.js`/`ai-match.js` are browser-only mirrors, and `GameCanvas` changes must stay optional.
 - Move per-frame data into React state or add React renders inside the rAF loop.
 - Change the world seed or physics constants without checking tests, server bounds, and spawns.
 - Write secrets to `VITE_*` variables or commit `.env` files.
@@ -509,6 +526,10 @@ route — `/api/game/health` is **not** routed).
   server as signaling-only for voice, and all media/mic state in refs. Mirror the 240-character
   limit across both `chat.js` files, keep signaling relay room-scoped to opted-in peers, and add
   tests to `server/test/{chat,voice}.test.js` and `tests/rooms-integration.test.js`."
+- **AI mode changes:** "Update the You vs AI opponent while keeping it browser-only: change
+  `game/ai.js` for steering and `game/ai-match.js` for scoring, add pure tests in `tests/`, and
+  do not add Socket.IO events or server logic. Reuse `GameCanvas` as-is through its existing
+  `sendMove` callback; keep any shared-component changes optional."
 - **Touch duplicated constants:** "This change affects [bounds/codes/colors/spawns]. Update both
   the frontend and server copies, run the cross-side test (`tests/room-id.test.js` or the color
   tests), and confirm no other sync points were missed."

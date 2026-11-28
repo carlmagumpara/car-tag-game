@@ -11,6 +11,11 @@ also has **text chat** and optional **voice**: chat is ephemeral and room-scoped
 browser-to-browser WebRTC mesh whose signaling rides on the same Socket.IO connection (audio
 never passes through the server).
 
+There are two independent modes. **Multiplayer** is the room-based game described above. **You
+vs AI** is a local single-player match on the same city: the rival drives itself, chases when it is
+"it" and flees when you are, and all tag/round rules run in the browser. It needs no room code,
+second player or game server, and it never opens a Socket.IO connection.
+
 - **Frontend:** React 19, Vite 8, Tailwind CSS 3, HTML Canvas, Socket.IO Client. JavaScript/JSX only.
 - **Backend:** Express 5, Socket.IO 4, in-memory player state.
 - **Deployment:** Vercel hosts both the static frontend and the Socket.IO function; the
@@ -63,18 +68,26 @@ are deleted so their codes can be reused. A bare `/#/game` URL gets a freshly ge
   server only validates and relays `voice:offer` / `voice:answer` / `voice:ice` between drivers
   who are both in voice in the same room; it does not handle audio. Microphone state stays in
   refs, and remote audio plays through hidden `<audio>` elements.
+- **You vs AI** (`#/ai`) is a separate client-only path: `AiGame.jsx` + `useAiGame.js` own the
+  local match and never call `useMultiplayer`. The rival is stepped from the same `GameCanvas`
+  rAF loop via its `sendMove` callback (20 Hz), so it reuses the existing physics, collisions,
+  camera, interpolation and rendering. `ai.js` produces the steering actions; `ai-match.js`
+  mirrors the server's tag and round rules locally. An obstacle index buckets buildings once per
+  world, and steering probes nearby rectangles so the rival stays on navigable ground.
 
 ### File map
 
 ```
 src/
-  App.jsx                              hash routing (#/game/<CODE>), create/join landing page
+  App.jsx                              hash routing (#/game/<CODE>, #/ai), mode picker, landing page
   features/car-game/
-    CarGame.jsx                        composition, overlays, pause/exit, copy room link
+    CarGame.jsx                        multiplayer composition, overlays, pause/exit, copy room link
+    AiGame.jsx                         You vs AI composition, result overlay, restart
     game/room-id.js                     six-character code generation/normalization
     game/car-colors.js                  selectable car palette, normalization, localStorage
     GameCanvas.jsx                     rAF loop, camera, DPR canvas, effects
-    components/GameHUD.jsx             speed, status, online count, pause/exit
+    components/GameHUD.jsx             multiplayer speed, status, online count, pause/exit
+    components/AiHUD.jsx               local match status, score, timer, ready/restart
     components/PlayerList.jsx          roster with color swatches
     components/GameControls.jsx        keyboard legend
     components/TouchControls.jsx       mobile pointer buttons
@@ -84,7 +97,10 @@ src/
     components/NameGate.jsx            name prompt for direct share links
     hooks/useKeyboard.js               key state in a ref, blur/visibility cleanup
     hooks/useMultiplayer.js            socket lifecycle, roster, reconnection, chat
+    hooks/useAiGame.js                 local AI match state, rival stepping, scoring
     hooks/useVoice.js                  WebRTC mesh: mic, peers, signaling, cleanup
+    game/ai.js                         pure AI steering: chase, flee, obstacle avoidance
+    game/ai-match.js                   pure local tag/round rules (mirrors server)
     game/chat.js                       client chat input normalization
     game/player-name.js                random name + name normalization
     game/voice-config.js               build-time STUN configuration
@@ -182,6 +198,10 @@ the HUD and open that link in a second window to see both cars. A bare `/#/game`
 and both transports; the Vercel variables below only affect deployed builds. Root dependencies
 now also include the server packages (needed by the Vercel Function), though `server/` still has
 its own package.
+
+To try **You vs AI**, click the **You vs AI** mode card on the landing page and then **Play vs
+AI** (or open `/#/ai` directly). It works even if the game server is not running; the rival is
+entirely local. Multiplayer still uses the two-terminal setup above.
 
 Other scripts:
 
@@ -310,6 +330,15 @@ the code or use **Copy link** in the HUD; anyone opening that link joins the sam
 code in the landing page's "Have a code?" field to join an existing room. Drivers in other rooms
 are invisible and have separate tags and rounds.
 
+**Game modes:** choose **Multiplayer** or **You vs AI** in the mode picker on the landing page.
+Multiplayer keeps the create/join flow above. You vs AI starts a local match at `/#/ai`: the rival
+starts as "it", chases your car (leading your movement) and flees once you tag it. It probes
+nearby buildings and the world edge before steering, handbrake-drifts through sharp turns and
+reverses briefly if it gets stuck. Both drivers share the same spawn road, physics and contact
+rules. Press `READY` to start the 60-second round; the result screen shows the tag counts and
+**Play again** resets both cars for a rematch. Chat and voice are multiplayer-only — a local
+match has no room, no connection and no other human drivers.
+
 **Car color:** pick a swatch under **Pick your car color** on the landing page before creating or
 joining a room. The choice is sent with the connection, so everyone in the room sees your car in
 that color, and it is saved in the browser for next time. Without a valid choice the server gives
@@ -436,9 +465,10 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 Automated (all executed during implementation):
 
 ```bash
-npm run test:all           # 43 frontend + 43 server tests (rooms, tag, round, chat, voice, names, join gate) — all passed
+npm run test:all           # 67 frontend + 43 server tests (AI steering/match, rooms, tag, round, chat, voice, names, join gate) — all passed
 npm run build              # production build — passed
 npm run server             # then: curl http://localhost:3001/health
+node _tmp/ai-mode-check.mjs        # browser: mode picker, full AI round + restart, multiplayer regression
 node _tmp/integration-check.mjs    # two Socket.IO clients: init/join/move/leave/error/reconnect
 node _tmp/tag-check.mjs            # two clients: contact transfers it, score updates, cooldown
 node _tmp/vercel-function-check.mjs  # api/game.js behind emulated /api/game route, websocket-only
@@ -448,10 +478,14 @@ node _tmp/reconnect-check.mjs      # stop/restart server -> client auto-reconnec
 The room tests cover code generation/normalization, per-room state isolation, the room cap,
 and two live Socket.IO clients that join different codes and receive only their own players.
 
-Browser verification used two isolated Chromium contexts against both `npm run dev` and
+Browser verification used isolated Chromium contexts against both `npm run dev` and
 the production preview (`npm run preview`): both drivers appeared, driving changed the HUD
 speed, closing one session removed its car, pause/resume worked, and there were no console
-or page errors. `_tmp/` scripts are scratch tooling, gitignored and not required to run the game.
+or page errors. The AI check drove the player, confirmed the rival tagged it unaided, waited for
+the result overlay, restarted into a fresh waiting round, and then loaded multiplayer in a
+separate context to confirm it still connects and drives. A phone-sized viewport showed the
+touch controls without horizontal overflow. `_tmp/` scripts are scratch tooling, gitignored and
+not required to run the game.
 
 Manual test checklist:
 
@@ -476,6 +510,12 @@ Manual test checklist:
     Choose a name and confirm the car joins the room in the link.
 13. Start a round, then open the same link in a third window: it is refused with "A round is already
     in progress". When the round ends, the same link connects normally.
+14. Pick **You vs AI** on the landing page and start a local match: the rival appears in the driver
+    list and starts as "it". Drive around and confirm it follows you, detours around buildings and
+    tags you; check that the HUD score and tag toast update without a server connection.
+15. Wait for the timer to expire: the result overlay shows both scores and a winner. Click **Play
+    again** to return to a fresh waiting round, then exit to home and create a multiplayer room to
+    confirm the socket connection still works.
 
 ---
 
