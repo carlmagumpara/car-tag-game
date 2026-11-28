@@ -21,8 +21,18 @@ export const config = Object.freeze({
   // overrides this with '/api/game'. Standalone servers use the default.
   socketPath: process.env.SOCKET_IO_PATH || '/socket.io',
   tagRadius: Math.min(Math.max(Number(process.env.TAG_RADIUS) || 38, 20), 80),
-  tagCooldownMs: Math.min(Math.max(Number(process.env.TAG_COOLDOWN_MS) || 5000, 200), 10000),
+  // Global gate between transfers: one collision can only pass "it" once, and
+  // a second car cannot be tagged again until this window closes.
+  tagCooldownMs: Math.min(Math.max(Number(process.env.TAG_COOLDOWN_MS) || 1000, 200), 10000),
+  // Per-player immunity given to the newly tagged driver. They cannot be
+  // tagged again during this window, but can still tag others after the
+  // global gate above closes.
+  immunityMs: Math.min(Math.max(Number(process.env.IMMUNITY_MS) || 2000, 200), 10000),
+  // How long the round-end results screen stays up before the next countdown.
+  resultHoldMs: Math.min(Math.max(Number(process.env.RESULT_HOLD_MS) || 2500, 500), 10000),
+  // Countdown shown before a fresh round, after the previous one ends.
+  countdownMs: Math.min(Math.max(Number(process.env.COUNTDOWN_MS) || 3000, 500), 10000),
   // Duration of a scoring round in seconds. The timer only runs while the
-  // round is active; it starts once at least two drivers are ready.
-  roundSeconds: Math.min(Math.max(Number(process.env.ROUND_SECONDS) || 60, 5), 3600),
+  // round is active; it starts automatically once two drivers are connected.
+  roundSeconds: Math.min(Math.max(Number(process.env.ROUND_SECONDS) || 90, 5), 3600),
 })

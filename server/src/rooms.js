@@ -37,11 +37,11 @@ export function normalizeRoomId(value) {
 }
 
 export class Room {
-  constructor(id, { maxPlayers, roundSeconds }) {
+  constructor(id, { maxPlayers, roundSeconds, countdownMs = 3000, resultHoldMs = 2500 }) {
     this.id = id
     this.store = new PlayerStore(maxPlayers)
     this.tagState = createTagState()
-    this.round = createRoundState(roundSeconds)
+    this.round = createRoundState(roundSeconds, countdownMs, resultHoldMs)
     this.limiters = new Map()
     this.violations = new Map()
     this.chatLimiters = new Map()
@@ -53,10 +53,16 @@ export class Room {
 }
 
 export class RoomManager {
-  constructor({ maxPlayers = 40, roundSeconds = 60, maxRooms = 200 } = {}) {
+  constructor({
+    maxPlayers = 40,
+    roundSeconds = 90,
+    countdownMs = 3000,
+    resultHoldMs = 2500,
+    maxRooms = 200,
+  } = {}) {
     this.rooms = new Map()
     this.maxRooms = maxRooms
-    this.options = { maxPlayers, roundSeconds }
+    this.options = { maxPlayers, roundSeconds, countdownMs, resultHoldMs }
   }
 
   get size() {

@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import GameCanvas from './GameCanvas.jsx'
 import AiHUD from './components/AiHUD.jsx'
 import GameControls from './components/GameControls.jsx'
 import PlayerList from './components/PlayerList.jsx'
 import TouchControls from './components/TouchControls.jsx'
+import {
+  playImmunitySound,
+  playRoundEndSound,
+  playTagSound,
+  unlockAudio,
+} from './game/audio.js'
 import { AI_MATCH } from './game/ai-match.js'
 import { useAiGame } from './hooks/useAiGame.js'
 import { useKeyboard } from './hooks/useKeyboard.js'
@@ -64,7 +70,7 @@ export default function AiGame({ onExit, carColor, driverName }) {
   const itName = roster.find((player) => player.isIt)?.name || 'Nobody'
   const tags = self?.tags || 0
   const ready = Boolean(self?.ready)
-  const immunitySeconds = useTagCooldown(tagEvent, AI_MATCH.tagCooldownMs)
+  const immunitySeconds = useTagCooldown(tagEvent, AI_MATCH.immunityMs)
   const controlsEnabled = Boolean(self) && !paused && !roundOver
   const { inputRef, clear } = useKeyboard({ enabled: controlsEnabled })
 
@@ -91,11 +97,38 @@ export default function AiGame({ onExit, carColor, driverName }) {
   }, [])
 
   const aiPlayer = roster.find((player) => player.id !== self?.id)
-  const winnerIds = game?.winnerIds || []
-  const youWon = winnerIds.includes(self?.id) && !winnerIds.includes(aiPlayer?.id)
-  const aiWon = winnerIds.includes(aiPlayer?.id) && !winnerIds.includes(self?.id)
-  const resultTitle = youWon ? 'You win!' : aiWon ? `${aiPlayer?.name || 'AI Rival'} wins!` : winnerIds.length ? "It's a draw!" : 'Round over'
+  const loserId = game?.loserId || null
+  const youLost = loserId === self?.id
+  const resultTitle = youLost ? 'You lose — you were it!' : `${aiPlayer?.name || 'AI Rival'} loses!`
   const needsOverlay = !self
+
+  const lastTagRef = useRef(null)
+  const lastPhaseRef = useRef(null)
+
+  useEffect(() => {
+    const unlock = () => unlockAudio()
+    window.addEventListener('pointerdown', unlock, { once: true })
+    window.addEventListener('keydown', unlock, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!tagEvent || lastTagRef.current === tagEvent) return
+    lastTagRef.current = tagEvent
+    if (tagEvent.reason === 'tag') playTagSound()
+    if (tagEvent.taggedId === self?.id || (tagEvent.reason === 'reassign' && tagEvent.itId === self?.id)) {
+      playImmunitySound()
+    }
+  }, [tagEvent, self?.id])
+
+  useEffect(() => {
+    const previous = lastPhaseRef.current
+    lastPhaseRef.current = phase
+    if (previous && previous !== phase && phase === 'finished') playRoundEndSound(youLost)
+  }, [phase, youLost])
 
   return (
     <main className="h-dvh w-screen overflow-hidden bg-slate-950">
@@ -159,9 +192,9 @@ export default function AiGame({ onExit, carColor, driverName }) {
 
             {roundOver && (
               <Overlay
-                icon={youWon ? '🏆' : '🏁'}
+                icon={youLost ? '💥' : '🏁'}
                 title={resultTitle}
-                message={`You ${tags} · ${aiPlayer?.name || 'AI Rival'} ${aiPlayer?.tags || 0} tags. The rival drives itself — try again for a rematch.`}
+                message={`Time ran out with ${loserId === aiPlayer?.id ? aiPlayer?.name || 'AI Rival' : 'you'} holding the tag. You ${tags} · ${aiPlayer?.name || 'AI Rival'} ${aiPlayer?.tags || 0} tags.`}
                 actionLabel="Play again"
                 onAction={restart}
                 secondaryLabel="Exit to home"

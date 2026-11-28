@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import GameCanvas from './GameCanvas.jsx'
 import ChatPanel from './components/ChatPanel.jsx'
 import GameControls from './components/GameControls.jsx'
@@ -6,6 +6,12 @@ import GameHUD from './components/GameHUD.jsx'
 import PlayerList from './components/PlayerList.jsx'
 import TouchControls from './components/TouchControls.jsx'
 import VoiceControls from './components/VoiceControls.jsx'
+import {
+  playImmunitySound,
+  playRoundEndSound,
+  playTagSound,
+  unlockAudio,
+} from './game/audio.js'
 import { getSocketConfig } from './game/socket-config.js'
 import { roomUrl } from './game/room-id.js'
 import { useKeyboard } from './hooks/useKeyboard.js'
@@ -69,7 +75,7 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
     reconnect,
     tagEvent,
     game,
-    tagCooldownMs,
+    immunityMs,
     chat,
     sendChat,
     sendReady,
@@ -97,10 +103,11 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
   const roundActive = phase === 'playing'
   const roundOver = phase === 'finished'
   const ready = Boolean(self?.ready)
-  const winnerIds = game?.winnerIds || []
-  const winners = (game?.standings || []).filter((entry) => winnerIds.includes(entry.id))
-  const winnerNames = winners.map((entry) => entry.name).join(' & ')
-  const immunitySeconds = useTagCooldown(tagEvent, tagCooldownMs)
+  const loserId = game?.loserId || null
+  const loserName = (game?.standings || []).find((entry) => entry.id === loserId)?.name || 'Nobody'
+  const loserLost = loserId === self?.id
+  const standings = game?.standings || []
+  const immunitySeconds = useTagCooldown(tagEvent, immunityMs)
   const controlsEnabled = Boolean(self) && status === 'connected' && !paused && !roundOver
   const { inputRef, clear } = useKeyboard({ enabled: controlsEnabled })
 
@@ -159,6 +166,36 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
   }, [])
 
   const needsConnectionOverlay = status !== 'connected' || !self
+
+  const lastTagRef = useRef(null)
+  const lastPhaseRef = useRef(null)
+
+  useEffect(() => {
+    const unlock = () => unlockAudio()
+    window.addEventListener('pointerdown', unlock, { once: true })
+    window.addEventListener('keydown', unlock, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!tagEvent || lastTagRef.current === tagEvent) return
+    lastTagRef.current = tagEvent
+    if (tagEvent.reason === 'tag') playTagSound()
+    if (tagEvent.taggedId === self?.id || (tagEvent.reason === 'reassign' && tagEvent.itId === self?.id)) {
+      playImmunitySound()
+    }
+  }, [tagEvent, self?.id])
+
+  useEffect(() => {
+    const previous = lastPhaseRef.current
+    lastPhaseRef.current = phase
+    if (previous && previous !== phase && phase === 'finished') {
+      playRoundEndSound(loserId === self?.id)
+    }
+  }, [phase, loserId, self?.id])
 
   return (
     <main className="h-dvh w-screen overflow-hidden bg-slate-950">
@@ -227,6 +264,17 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
           </div>
         )}
 
+        {phase === 'countdown' && !needsConnectionOverlay && (
+          <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-xl border border-amber-400/30 bg-slate-950/80 px-4 py-2 text-center font-mono shadow-lg shadow-black/30 backdrop-blur-md">
+            <div className="font-mono text-[10px] font-semibold uppercase tracking-widest text-amber-300">
+              Next round starts in
+            </div>
+            <div className="mt-0.5 text-2xl font-bold leading-none text-white tabular-nums">
+              {Math.max(0, game?.secondsLeft ?? 0)}s
+            </div>
+          </div>
+        )}
+
         {error && status === 'connected' && (
           <div className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-lg border border-rose-400/30 bg-rose-950/80 px-4 py-2 text-center font-mono text-[11px] text-rose-200 backdrop-blur-md">
             {error}
@@ -249,14 +297,16 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
 
         {roundOver && !needsConnectionOverlay && (
           <Overlay
-            icon="🏆"
-            title={winnerNames ? `${winnerNames} ${winnerIds.length > 1 ? 'win' : 'wins'}!` : 'Round over'}
-            message={
-              winnerNames
-                ? `Most tags this round: ${winners[0]?.tags || 0}.${ready ? ' Waiting for the other drivers to ready up.' : ' Ready up for another round.'}`
-                : 'Nobody tagged anyone this round. Ready up to try again.'
-            }
-            actionLabel={ready ? 'Cancel ready' : 'Ready for next round'}
+            icon={loserLost ? '💥' : '🏁'}
+            title={loserLost ? 'You lose — you were it!' : `${loserName} loses!`}
+            message={`Time ran out with ${loserName} holding the tag. Results: ${
+              standings.map((entry) => `${entry.name} ${entry.tags}`).join(' · ') || 'no drivers'
+            }. ${
+              ready
+                ? 'Waiting for the other drivers.'
+                : 'The next round starts automatically.'
+            }`}
+            actionLabel={ready ? 'Cancel ready' : 'Ready now'}
             onAction={() => sendReady(!ready)}
             secondaryLabel="Exit to home"
             onSecondary={onExit}

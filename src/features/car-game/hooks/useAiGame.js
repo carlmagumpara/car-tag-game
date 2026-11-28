@@ -3,10 +3,12 @@ import { createAiBrain, driveAi } from '../game/ai.js'
 import {
   AI_MATCH,
   applyAiTag,
+  armAiCountdown,
   assignAiIt,
   createAiMatch,
   evaluateAiTag,
   maybeFinishAiRound,
+  maybeStartAiRound,
   publicAiGame,
   setAiReady,
 } from '../game/ai-match.js'
@@ -59,6 +61,7 @@ export function useAiGame({ carColor, driverName }) {
       isIt: Boolean(entry.isIt),
       tags: entry.tags || 0,
       ready: Boolean(entry.ready),
+      immuneUntil: entry.immuneUntil || 0,
     })
     setSelf(view(player))
     setRoster([view(player), view(ai)])
@@ -151,7 +154,12 @@ export function useAiGame({ carColor, driverName }) {
     const hit = evaluateAiTag(match, players, now)
     if (hit && applyAiTag(match, players, hit, now)) {
       syncUi()
-      setTagEvent({ ...hit, receivedAt: now })
+      setTagEvent({
+        ...match.tagEvent,
+        receivedAt: now,
+        immuneUntilLocal: now + AI_MATCH.immunityMs,
+        immunityMs: AI_MATCH.immunityMs,
+      })
     }
 
     const remote = playersRef.current.get(AI_ID)
@@ -171,14 +179,29 @@ export function useAiGame({ carColor, driverName }) {
       if (!player || !ai || !match) return
       const now = performance.now()
       const players = [player, ai]
-      const finished = maybeFinishAiRound(match, players, now)
+      const finished = maybeFinishAiRound(match, players, now, match.itId)
+      if (
+        match.phase === 'finished' &&
+        now >= match.finishedAt + match.resultHoldMs
+      ) {
+        armAiCountdown(match, players, now)
+      }
+      if (maybeStartAiRound(match, players, now)) {
+        // The rival starts as "it" each round so it chases from the first tick.
+        assignAiIt(match, players, AI_ID)
+        lastTickRef.current = now
+        brainRef.current = createAiBrain()
+        syncUi()
+        setTagEvent(null)
+      }
       const next = publicAiGame(match, players, now)
       setGame((previous) =>
         previous &&
         previous.phase === next.phase &&
         previous.secondsLeft === next.secondsLeft &&
         previous.readyIds.length === next.readyIds.length &&
-        previous.winnerIds.length === next.winnerIds.length
+        previous.winnerIds.length === next.winnerIds.length &&
+        previous.loserId === next.loserId
           ? previous
           : next,
       )

@@ -84,6 +84,7 @@ function GameCanvas({ inputRef, playersRef, self, sendMove, onHudUpdate, paused,
     if (!localRef.current || !self) return
     localRef.current.isIt = Boolean(self.isIt)
     localRef.current.tags = self.tags || 0
+    localRef.current.immuneUntil = self.immuneUntil || 0
   }, [self])
 
   useEffect(() => {
@@ -217,6 +218,7 @@ function GameCanvas({ inputRef, playersRef, self, sendMove, onHudUpdate, paused,
             braking: false,
             isIt: Boolean(entry.info.isIt),
             tags: entry.info.tags || 0,
+            immuneUntil: entry.info.immuneUntil || 0,
           })
         }
       }

@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
-import { TAG_COOLDOWN_MS } from '../game/constants.js'
+import { IMMUNITY_MS } from '../game/constants.js'
 import { createInterpolationBuffer, pruneBuffer, pushSnapshot } from '../game/interpolation.js'
 
 const DEFAULT_TRANSPORTS = ['websocket', 'polling']
+
+// Server timestamps use epoch ms; the animation loop uses performance.now().
+// The offset is captured once so shields expire at the same moment on every
+// client even when their wall clocks disagree.
+const toLocalTime = (serverTime, offset) => (serverTime > 0 ? serverTime - offset : 0)
 
 // Owns the socket lifecycle and UI-facing connection state. High-frequency
 // movement never touches React state: snapshots go into playersRef and are
@@ -30,7 +35,7 @@ export function useMultiplayer({
   const [playerCount, setPlayerCount] = useState(0)
   const [tagEvent, setTagEvent] = useState(null)
   const [game, setGame] = useState(null)
-  const [tagCooldownMs, setTagCooldownMs] = useState(TAG_COOLDOWN_MS)
+  const [immunityMs, setImmunityMs] = useState(IMMUNITY_MS)
   const [chat, setChat] = useState([])
   const [socketEpoch, setSocketEpoch] = useState(0)
   const [attempt, setAttempt] = useState(0)
@@ -42,12 +47,13 @@ export function useMultiplayer({
       setSelf(null)
       setTagEvent(null)
       setGame(null)
-      setTagCooldownMs(TAG_COOLDOWN_MS)
+      setImmunityMs(IMMUNITY_MS)
       setChat([])
       return undefined
     }
 
     let disposed = false
+    const clockOffset = Date.now() - performance.now()
     setStatus('connecting')
     setError(null)
     setSelf(null)
@@ -97,15 +103,22 @@ export function useMultiplayer({
 
     const onInit = (data) => {
       if (disposed || !data?.player) return
-      // The server owns the grace period; a configured override must win over
-      // the client's mirrored default when the HUD shows the countdown.
-      if (Number.isFinite(data.config?.tag?.cooldownMs)) {
-        setTagCooldownMs(data.config.tag.cooldownMs)
+      // The server owns both timers; configured overrides win over the
+      // client's mirrored defaults when the HUD shows the countdown.
+      if (Number.isFinite(data.config?.tag?.immunityMs)) {
+        setImmunityMs(data.config.tag.immunityMs)
       }
+      // A driver joining mid-round gets the live phase, timer and standings
+      // here instead of waiting for the next state broadcast.
+      if (data.round?.phase) setGame(data.round)
       if (data.roomId) setActiveRoomId(data.roomId)
       selfIdRef.current = data.player.id
-      setSelf(data.player)
-      const others = Array.isArray(data.players) ? data.players : []
+      const selfView = { ...data.player, immuneUntil: toLocalTime(data.player.immuneUntil, clockOffset) }
+      setSelf(selfView)
+      const others = (Array.isArray(data.players) ? data.players : []).map((player) => ({
+        ...player,
+        immuneUntil: toLocalTime(player.immuneUntil, clockOffset),
+      }))
       const now = performance.now()
       playersRef.current.clear()
       for (const player of others) {
@@ -113,19 +126,20 @@ export function useMultiplayer({
         pushSnapshot(entry.buffer, player, now)
         playersRef.current.set(player.id, entry)
       }
-      setRoster([data.player, ...others])
+      setRoster([selfView, ...others])
       setPlayerCount(others.length + 1)
     }
 
     const onJoined = (player) => {
       if (disposed || !player?.id || player.id === selfIdRef.current) return
+      const view = { ...player, immuneUntil: toLocalTime(player.immuneUntil, clockOffset) }
       if (!playersRef.current.has(player.id)) {
-        const entry = { info: player, buffer: createInterpolationBuffer() }
+        const entry = { info: view, buffer: createInterpolationBuffer() }
         pushSnapshot(entry.buffer, player, performance.now())
         playersRef.current.set(player.id, entry)
       }
       setRoster((previous) =>
-        previous.some((item) => item.id === player.id) ? previous : [...previous, player],
+        previous.some((item) => item.id === player.id) ? previous : [...previous, view],
       )
       setPlayerCount((count) => count + 1)
     }
@@ -140,7 +154,7 @@ export function useMultiplayer({
           entry = { info: state, buffer: createInterpolationBuffer() }
           playersRef.current.set(state.id, entry)
         }
-        entry.info = state
+        entry.info = { ...state, immuneUntil: toLocalTime(state.immuneUntil, clockOffset) }
         pushSnapshot(entry.buffer, state, now)
         pruneBuffer(entry.buffer, now)
       }
@@ -155,23 +169,39 @@ export function useMultiplayer({
 
     const onTagHit = (payload) => {
       if (disposed || !payload?.itId) return
-      setTagEvent({ ...payload, receivedAt: performance.now() })
+      const receivedAt = performance.now()
+      const immunity = Number.isFinite(payload.immunityMs) ? payload.immunityMs : IMMUNITY_MS
+      // Use the server's absolute expiry when present; fall back to the
+      // receipt time so raw events without a timestamp still count down.
+      const immuneUntilLocal = Number.isFinite(payload.immuneUntil)
+        ? toLocalTime(payload.immuneUntil, clockOffset)
+        : receivedAt + immunity
+      setTagEvent({ ...payload, receivedAt, immuneUntilLocal, immunityMs: immunity })
       const updates = new Map(
-        (Array.isArray(payload.players) ? payload.players : []).map((state) => [state.id, state]),
+        (Array.isArray(payload.players) ? payload.players : []).map((state) => [
+          state.id,
+          { ...state, immuneUntil: toLocalTime(state.immuneUntil, clockOffset) },
+        ]),
       )
       setSelf((current) => {
         const update = current && updates.get(current.id)
-        return update ? { ...current, isIt: update.isIt, tags: update.tags } : current
+        return update
+          ? { ...current, isIt: update.isIt, tags: update.tags, immuneUntil: update.immuneUntil }
+          : current
       })
       setRoster((previous) =>
         previous.map((player) => {
           const update = updates.get(player.id)
-          return update ? { ...player, isIt: update.isIt, tags: update.tags } : player
+          return update
+            ? { ...player, isIt: update.isIt, tags: update.tags, immuneUntil: update.immuneUntil }
+            : player
         }),
       )
       for (const [id, update] of updates) {
         const entry = playersRef.current.get(id)
-        if (entry) entry.info = { ...entry.info, isIt: update.isIt, tags: update.tags }
+        if (entry) {
+          entry.info = { ...entry.info, isIt: update.isIt, tags: update.tags, immuneUntil: update.immuneUntil }
+        }
       }
     }
 
@@ -209,7 +239,7 @@ export function useMultiplayer({
       setPlayerCount(0)
       setTagEvent(null)
       setGame(null)
-      setTagCooldownMs(TAG_COOLDOWN_MS)
+      setImmunityMs(IMMUNITY_MS)
       setChat([])
       selfIdRef.current = null
       playersRef.current.clear()
@@ -319,7 +349,7 @@ export function useMultiplayer({
     reconnect,
     tagEvent,
     game,
-    tagCooldownMs,
+    immunityMs,
     chat,
     sendChat,
     sendReady,

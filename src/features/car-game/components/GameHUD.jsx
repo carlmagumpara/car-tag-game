@@ -34,7 +34,7 @@ export default function GameHUD({
   const connection = STATUS_STYLES[status] || STATUS_STYLES.offline
   const phase = game?.phase || 'waiting'
   const playing = phase === 'playing'
-  const secondsLeft = game?.secondsLeft ?? game?.roundSeconds ?? 60
+  const secondsLeft = game?.secondsLeft ?? game?.roundSeconds ?? 90
   const readyCount = game?.readyIds?.length || 0
   const minPlayers = game?.minPlayers || 2
 
@@ -100,7 +100,7 @@ export default function GameHUD({
       {immunitySeconds > 0 && (
         <div className="pointer-events-auto rounded-lg border border-emerald-400/40 bg-emerald-950/70 px-3 py-1.5 font-mono text-[11px] backdrop-blur-md">
           <span className="font-semibold text-emerald-200">
-            Stay away · no tags for {immunitySeconds}s
+            Shield · immune for {immunitySeconds}s
           </span>
         </div>
       )}
@@ -115,11 +115,13 @@ export default function GameHUD({
         <span className="font-semibold">
           {playing
             ? `Round · ${formatTime(secondsLeft)} left`
-            : phase === 'finished'
-              ? 'Round over — ready up again'
-              : playerCount < minPlayers
-                ? `Need ${minPlayers} drivers to start`
-                : `Ready ${readyCount}/${playerCount}`}
+            : phase === 'countdown'
+              ? `Next round in ${secondsLeft}s`
+              : phase === 'finished'
+                ? 'Round over — next round starting'
+                : playerCount < minPlayers
+                  ? `Need ${minPlayers} drivers to start`
+                  : `Ready ${readyCount}/${playerCount}`}
         </span>
         {!playing && (
           <button

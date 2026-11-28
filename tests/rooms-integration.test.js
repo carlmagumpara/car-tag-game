@@ -127,6 +127,44 @@ test('a chosen car color is assigned and shared with the rest of the room', asyn
   assert.notEqual(initB.player.color, '#f97316')
 })
 
+test('simultaneous contact produces exactly one tag and one tagger', async () => {
+  const a = connect('TAGAAA')
+  const started = waitForPhase(a, 'playing', 8000)
+  const b = connect('TAGAAA')
+  const c = connect('TAGAAA')
+  const inits = await Promise.all([
+    once(a, 'game:init', 8000),
+    once(b, 'game:init', 8000),
+    once(c, 'game:init', 8000),
+  ])
+  await started
+  // The fresh tagger starts with a short global gate.
+  await sleep(1100)
+
+  const room = rooms.get('TAGAAA')
+  const socketsById = new Map(inits.map((init, index) => [init.id, [a, b, c][index]]))
+  const hits = []
+  a.on('tag:hit', (payload) => hits.push(payload))
+
+  const tagger = room.store.snapshot().find((player) => player.isIt)
+  const others = room.store.snapshot().filter((player) => player.id !== tagger.id)
+  socketsById.get(tagger.id).emit('player:move', { x: 1700, y: 1200, angle: 0, speed: 0 })
+  others.forEach((player, index) => {
+    socketsById.get(player.id).emit('player:move', {
+      x: 1702 + index * 2,
+      y: 1200,
+      angle: 0,
+      speed: 0,
+    })
+  })
+  await sleep(250)
+
+  assert.equal(hits.length, 1)
+  assert.equal(room.store.snapshot().filter((player) => player.isIt).length, 1)
+  assert.ok(hits[0].immunityMs > 0)
+  assert.ok(hits[0].immuneUntil > Date.now())
+})
+
 test('health reports active rooms and total players', async () => {
   const socket = connect('HEALTH')
   await once(socket, 'game:init')
@@ -224,27 +262,38 @@ test('voice peers and signaling stay inside the room and require opt-in', async 
   assert.deepEqual((await peersForA).peers, [{ id: a.id, muted: false }])
 })
 
-test('a newcomer is refused while a round is playing and allowed once it ends', async () => {
+test('a newcomer joins mid-round and receives the live round state', async () => {
   const a = connect('PLAYAA')
+  // Subscribe before the second driver connects: the countdown starts on that
+  // join, so a slow init must not hide the later phase broadcasts.
+  const started = waitForPhase(a, 'playing', 8000)
   const b = connect('PLAYAA')
-  await Promise.all([once(a, 'game:init'), once(b, 'game:init')])
+  const waitInitA = once(a, 'game:init', 8000)
+  const waitInitB = once(b, 'game:init', 8000)
+  const initA = await waitInitA
+  await waitInitB
+  assert.equal(initA.config.roundSeconds, 90)
+  assert.equal(initA.config.tag.cooldownMs, 1000)
+  assert.equal(initA.config.tag.immunityMs, 2000)
 
-  const started = waitForPhase(a, 'playing')
   a.emit('player:ready', { ready: true })
   b.emit('player:ready', { ready: true })
   await started
 
-  const blocked = connect('PLAYAA')
-  const error = await once(blocked, 'game:error')
-  assert.equal(error.code, 'GAME_IN_PROGRESS')
-  assert.match(error.message, /round is already in progress/)
-
-  // Force the round to expire so the gate can be checked on the other side.
-  rooms.get('PLAYAA').round.endsAt = Date.now() - 1
-  await waitForPhase(a, 'finished')
-
-  const accepted = connect('PLAYAA')
-  const init = await once(accepted, 'game:init')
+  const late = connect('PLAYAA')
+  const init = await once(late, 'game:init', 8000)
   assert.equal(init.roomId, 'PLAYAA')
+  assert.equal(init.round.phase, 'playing')
+  assert.ok(init.round.secondsLeft > 0 && init.round.secondsLeft <= 90)
   assert.ok(init.players.some((player) => player.id === a.id))
+  assert.ok(init.players.some((player) => player.id === b.id))
+  assert.equal(init.players.filter((player) => player.isIt).length, 1)
+
+  // The losing driver is the one holding "it" when the clock expires.
+  const room = rooms.get('PLAYAA')
+  room.round.endsAt = Date.now() - 1
+  const finished = waitForPhase(a, 'finished', 6000)
+  const state = await finished
+  assert.equal(state.loserId, room.tagState.itId)
+  assert.ok(!state.winnerIds.includes(state.loserId))
 })

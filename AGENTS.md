@@ -16,15 +16,16 @@ split between two independently deployable packages. Preserve those boundaries.
 **Neon Drive** is a browser-based, top-down multiplayer car tag game. Visitors create or join a
 private room via a six-character code, drive around a shared procedurally generated neon city,
 and play timed rounds of tag: one driver is "it", bumping into another driver passes the role on,
-and the driver with the most tags when the timer expires wins.
+and the driver holding "it" when the 90-second timer expires loses.
 
 - The frontend runs **local delta-time physics** for the player's own car, so input feels
   immediate with no server round trip.
 - The server **validates and clamps** client-reported movement and broadcasts room-scoped
   snapshots at 20 Hz. Remote cars are rendered 100 ms in the past and interpolated.
 - **Tag state and round state are server-owned.** Clients never decide who is "it", who scored,
-  or who won, and cannot claim a tag themselves. Every tag starts a 5-second immunity window in
-  both modes; the HUD counts it down while no tag can land.
+  or who lost, and cannot claim a tag themselves. Every tag starts a 1-second global transfer
+  gate and gives the newly tagged driver a 2-second shield in both modes; the HUD counts the
+  shield down.
 - Each room has **ephemeral text chat** and optional **open-mic voice**. Chat is validated and
   broadcast by the server; voice is a browser-to-browser WebRTC mesh where the server only
   validates and relays signaling (SDP offers/answers and ICE candidates).
@@ -88,7 +89,7 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │       │   ├── useKeyboard.js     key state in a ref; blur/visibility cleanup
 │       │   ├── useMultiplayer.js  socket lifecycle, roster, reconnect, chat, send helpers
 │       │   ├── useAiGame.js       local AI match: rival stepping, scoring, restart
-│       │   ├── useTagCooldown.js  HUD countdown for the 5s post-tag immunity
+│       │   ├── useTagCooldown.js  HUD countdown for the 2s post-tag shield
 │       │   └── useVoice.js        WebRTC mesh: mic, peers, signaling, cleanup
 │       └── game/                  PURE, DOM-light logic (unit-tested directly by Node)
 │           ├── ai.js              AI steering: chase/flee, obstacle probing, smoothing
@@ -119,7 +120,7 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │   │   ├── rooms.js               RoomManager/Room; room id rules; per-room state containers
 │   │   ├── players.js             palette (duplicated), generated names, spawn slots, PlayerStore
 │   │   ├── tag.js                 PURE tag rules: contact, cooldown, reassignment
-│   │   ├── round.js               PURE round rules: ready, timer, standings, winner
+│   │   ├── round.js               PURE round rules: auto countdown, timer, standings, loser
 │   │   └── validation.js          PURE movement validation + rate limiter + server bounds
 │   └── test/                      node:test suites for players/rooms/round/tag/validation
 │
@@ -144,10 +145,11 @@ Four pairs of values are duplicated. Change both sides together and add/update a
 | `src/features/car-game/game/car-colors.js` (`CAR_COLORS`) | `server/src/players.js` (`CAR_COLORS`) | exact hex values and ids |
 | `src/features/car-game/game/world.js` (`getSpawnPoints`) | `server/src/players.js` (`spawnFor`) | spawn positions on the central road |
 | `src/features/car-game/game/chat.js` (`CHAT_MAX_LENGTH`) | `server/src/chat.js` (`CHAT_MAX_LENGTH`) | 240-character chat limit |
-| `src/features/car-game/game/constants.js` (`TAG_COOLDOWN_MS`) | `server/src/config.js` (`tagCooldownMs`) | 5 s immunity after a tag; multiplayer overrides via `game:init` |
+| `src/features/car-game/game/constants.js` (`TAG_COOLDOWN_MS`, `IMMUNITY_MS`) | `server/src/config.js` (`tagCooldownMs`, `immunityMs`) | 1 s global tag gate + 2 s per-player shield; multiplayer overrides via `game:init` |
 | `src/features/car-game/game/player-name.js` (`PLAYER_NAME_MAX_LENGTH`) | `server/src/players.js` (same export) | 24-character single-line names |
 
-Network timing is mirrored too: `NETWORK.sendIntervalMs = 50`, `NETWORK.serverTickMs = 50`,
+Round timing is mirrored too: `ROUND_SECONDS = 90`, `COUNTDOWN_MS = 3000`, `RESULT_HOLD_MS =
+2500`. Network timing: `NETWORK.sendIntervalMs = 50`, `NETWORK.serverTickMs = 50`,
 `config.tickMs = 50`. The city seed (`createWorld(seed = 20261127)`) is client-only; the server
 never sends map data.
 
@@ -177,9 +179,9 @@ Useful scripts (from root unless noted):
 | `npm run dev` | Vite dev server at `http://localhost:5173` |
 | `npm run server` | Standalone game server at `http://localhost:3001` (`GET /health`) |
 | `npm run build` / `npm run preview` | Production build into `dist/` / preview at `:4173` |
-| `npm test` | 67 frontend/node:test suites (`tests/*.test.js`) |
-| `npm run test:server` | 43 server suites (`server/test/*.test.js`) |
-| `npm run test:all` | both suites (110 tests total at time of writing) |
+| `npm test` | 70 frontend/node:test suites (`tests/*.test.js`) |
+| `npm run test:server` | 47 server suites (`server/test/*.test.js`) |
+| `npm run test:all` | both suites (117 tests total at time of writing) |
 | `cd server && npm run dev` | server with `--watch` auto-restart |
 
 ---
@@ -203,7 +205,7 @@ Useful scripts (from root unless noted):
 ### React conventions
 
 - Function components and hooks only; no class components.
-- Props are destructured in the signature. Derived values (`isIt`, `phase`, `winnerNames`,
+- Props are destructured in the signature. Derived values (`isIt`, `phase`, `loserName`,
   `controlsEnabled`) are computed inline, not stored in state.
 - `App.jsx` owns hash routing and car color; `CarGame.jsx` is remounted per room via
   `key={roomId}` so a new room fully resets UI state.
@@ -298,15 +300,15 @@ There is **no REST API** except two health endpoints. Application integration is
 
 | Event | Direction | Payload | Notes |
 | --- | --- | --- | --- |
-| `game:init` | server → client | `{ id, roomId, player, players, config: { maxPlayers, tickMs, world, tag, roundSeconds, minPlayers } }` | Emitted after the socket joins its room; `players` excludes self |
+| `game:init` | server → client | `{ id, roomId, player, players, config: { maxPlayers, tickMs, world, tag, countdownMs, roundSeconds, minPlayers }, round }` | Emitted after the socket joins its room; `players` excludes self; `round` is the live state, so mid-round joins work |
 | `player:joined` | server → others | `Player` | Room-scoped |
 | `player:move` | client → server | `{ x, y, angle, speed }` | ≤ 20 Hz (`NETWORK.sendIntervalMs = 50`); validated + clamped |
 | `player:moved` | server → room | `{ players: Player[] }` | One 20 Hz tick broadcast per room |
 | `player:left` | server → room | `{ id }` | On disconnect |
-| `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; ignored while `phase === 'playing'` |
-| `game:state` | server → room | `{ phase, roundSeconds, secondsLeft, endsAt, minPlayers, readyIds, winnerIds, standings }` | Transitions, joins, readiness, leaves, once per countdown second |
-| `tag:hit` | server → room | `{ taggerId, taggedId, itId, reason, at, players: [{ id, isIt, tags }] }` | `reason` = `tag` or `reassign`; drives toasts and flashes |
-| `game:error` | server → client | `{ code, message }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (silent drop), `INVALID_CHAT`, `SERVER_FULL`, `ROOM_UNAVAILABLE`, `GAME_IN_PROGRESS` |
+| `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; `false` cancels and `true` re-arms the pre-round countdown; ignored while `phase === 'playing'` |
+| `game:state` | server → room | `{ phase, roundSeconds, secondsLeft, endsAt, nextRoundAt, countdownMs, minPlayers, readyIds, winnerIds, loserId, standings }` | Transitions, joins, readiness, leaves, once per countdown second; phases are `waiting`, `countdown`, `playing`, `finished` |
+| `tag:hit` | server → room | `{ taggerId, taggedId, itId, reason, at, immunityMs, immuneUntil, players: [{ id, isIt, tags, immuneUntil }] }` | `reason` = `tag` or `reassign`; drives toasts, flashes and shield countdowns |
+| `game:error` | server → client | `{ code, message }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (silent drop), `INVALID_CHAT`, `SERVER_FULL`, `ROOM_UNAVAILABLE` |
 | `chat:send` | client → server | `{ text }` | 1–240 chars, single line; 400 ms gap, max 3/s |
 | `chat:message` | server → room | `{ id, playerId, name, color, text, at }` | Identity/timestamp server-owned; no history retained |
 | `voice:state` | client → server | `{ enabled, muted }` | Opt in/out; only enabled drivers are participants |
@@ -314,8 +316,9 @@ There is **no REST API** except two health endpoints. Application integration is
 | `voice:offer` / `voice:answer` | client → server → target | `{ to, sdp }` | Relayed as `{ from, sdp }` only within a room to opted-in peers |
 | `voice:ice` | client → server → target | `{ to, candidate }` | Relayed as `{ from, candidate }` under the same rules |
 
-`Player` shape: `{ id, name, color, x, y, angle, speed, isIt, tags, ready }`. `angle` is
-normalized to `[-π, π]`; `speed` is signed px/s. IDs and names are server-generated.
+`Player` shape: `{ id, name, color, x, y, angle, speed, isIt, tags, ready, immuneUntil }`.
+`angle` is normalized to `[-π, π]`; `speed` is signed px/s; `immuneUntil` is a server epoch ms
+expiry for the shield. IDs and names are server-generated.
 
 ### Handshake
 
@@ -327,9 +330,8 @@ normalized to `[-π, π]`; `speed` is signed px/s. IDs and names are server-gene
   A saved name from `localStorage` is prefilled and used automatically on share links; no name is
   prompted again until the stored choice is cleared.
 - Missing/invalid room code creates a fresh room whose id is returned in `game:init`.
-- A socket is refused with `GAME_IN_PROGRESS` and disconnected when `canJoinRound(room.round)` is
-  false (phase `playing`). Joining a waiting or finished room remains allowed. The client keeps the
-  error overlay visible, disables auto-retry for that rejection, and re-enables it on manual retry.
+- A socket may join in any phase, including mid-round. `game:init` carries the live `round` state
+  plus each player's `isIt`/`tags`/`immuneUntil`, so a late joiner is immediately synchronized.
 - `getSocketConfig()` in `src/features/car-game/game/socket-config.js` reads
   `VITE_GAME_SERVER_URL` (fallback: same origin in PROD, `http://localhost:3001` in dev),
   `VITE_GAME_SOCKET_PATH` (default `/socket.io`), and `VITE_GAME_TRANSPORTS` (default
@@ -378,7 +380,7 @@ route — `/api/game/health` is **not** routed).
 - Authorization is limited to structural rules enforced by the server:
   - A socket can only update/ready **its own** player (handlers use `socket.id`).
   - Tag and round state are server-authoritative; client-supplied `isIt`, `tags`, `readyIds`,
-    `winnerIds`, or `id` are never accepted from payloads.
+    `winnerIds`, `loserId`, `immuneUntil`, or `id` are never accepted from payloads.
   - CORS is restricted to the comma-separated `CLIENT_ORIGINS` allowlist (explicit origins,
     no wildcards) with methods `GET`/`POST`.
   - Rate limiting and malformed-packet disconnects are the only abuse controls.
@@ -412,7 +414,7 @@ route — `/api/game/health` is **not** routed).
   both import pure modules directly under Node, like the rest of the frontend suites.
 - Verify with:
   ```bash
-  npm run test:all        # 67 frontend + 43 server tests
+  npm run test:all        # 70 frontend + 47 server tests
   npm run build           # production build must succeed
   ```
 - Manual verification lives in `_tmp/*.mjs` scratch Playwright scripts (two isolated browser

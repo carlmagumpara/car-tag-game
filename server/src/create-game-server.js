@@ -8,7 +8,7 @@ import { normalizeCarColor, publicPlayer } from './players.js'
 import { RoomManager, normalizeRoomId } from './rooms.js'
 import {
   MIN_PLAYERS,
-  canJoinRound,
+  armCountdown,
   handlePlayerLeft,
   isRoundActive,
   maybeFinishRound,
@@ -22,6 +22,7 @@ import {
   evaluateTag,
   publicTagState,
   removePlayer,
+  resetTag,
 } from './tag.js'
 import { normalizeVoiceSignal, normalizeVoiceState } from './voice.js'
 import { createRateLimiter, SERVER_BOUNDS, validateMove } from './validation.js'
@@ -34,11 +35,18 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
   const rooms = new RoomManager({
     maxPlayers: config.maxPlayers,
     roundSeconds: config.roundSeconds,
+    countdownMs: config.countdownMs,
+    resultHoldMs: config.resultHoldMs,
     maxRooms: config.maxRooms,
   })
 
   function broadcastTag(room, hit) {
-    io.to(room.id).emit('tag:hit', { ...hit, players: publicTagState(room.store.snapshot()) })
+    io.to(room.id).emit('tag:hit', {
+      ...hit,
+      immunityMs: config.immunityMs,
+      immuneUntil: hit.itId ? hit.at + config.immunityMs : 0,
+      players: publicTagState(room.store.snapshot()),
+    })
   }
 
   function voicePeersPayload(room) {
@@ -57,6 +65,8 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       state.secondsLeft,
       state.readyIds.join(','),
       state.winnerIds.join(','),
+      state.loserId || '',
+      state.nextRoundAt,
     ].join('|')
   }
 
@@ -71,10 +81,13 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
   }
 
   function resetTagger(room, now) {
-    room.tagState.itId = null
-    room.tagState.cooldownUntil = 0
-    room.tagState.lastTaggerId = null
-    const reassignment = ensureIt(room.store.snapshot(), room.tagState, now, config.tagCooldownMs)
+    const reassignment = resetTag(
+      room.store.snapshot(),
+      room.tagState,
+      now,
+      config.tagCooldownMs,
+      config.immunityMs,
+    )
     if (reassignment) broadcastTag(room, reassignment)
   }
 
@@ -145,17 +158,6 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       return
     }
 
-    // Only the drivers who started a round may play it. A newcomer joining
-    // mid-round would see cars already in motion and could skew the scoring.
-    if (!canJoinRound(room.round)) {
-      socket.emit('game:error', {
-        code: 'GAME_IN_PROGRESS',
-        message: `A round is already in progress in room ${room.id}. Wait for it to finish and try again.`,
-      })
-      socket.disconnect(true)
-      return
-    }
-
     // A driver may pick a car color on the landing page. Anything else gets a
     // distinct default color from the room's spawn index.
     const requestedColor = normalizeCarColor(
@@ -175,7 +177,13 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
     room.voiceLimiters.set(socket.id, createRateLimiter({ minIntervalMs: 0, maxPerSecond: 50 }))
     socket.join(room.id)
 
-    const reassignment = ensureIt(room.store.snapshot(), room.tagState, now, config.tagCooldownMs)
+    const reassignment = ensureIt(
+      room.store.snapshot(),
+      room.tagState,
+      now,
+      config.tagCooldownMs,
+      config.immunityMs,
+    )
     if (reassignment) broadcastTag(room, reassignment)
 
     socket.emit('game:init', {
@@ -187,10 +195,18 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
         maxPlayers: config.maxPlayers,
         tickMs: config.tickMs,
         world: SERVER_BOUNDS,
-        tag: { radius: config.tagRadius, cooldownMs: config.tagCooldownMs },
+        tag: {
+          radius: config.tagRadius,
+          cooldownMs: config.tagCooldownMs,
+          immunityMs: config.immunityMs,
+        },
+        countdownMs: config.countdownMs,
         roundSeconds: config.roundSeconds,
         minPlayers: MIN_PLAYERS,
       },
+      // Sent on the handshake so a driver joining mid-round gets the live
+      // phase, timer, loser and standings on the very first event.
+      round: publicRoundState(room.round, room.store.snapshot(), now),
     })
     socket.to(room.id).emit('player:joined', publicPlayer(player))
     // Always give the new socket the current phase, even when the signature
@@ -200,9 +216,10 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
     // learn about them when they enable their own mic.
     socket.emit('voice:peers', voicePeersPayload(room))
 
-    // A newcomer is never ready, so this only matters when the previous
-    // unready driver left and everyone remaining had already readied up.
-    maybeStartRound(room.store.snapshot(), room.round, now)
+    // Enough drivers may now be connected to arm the next round automatically.
+    // An active round keeps running; a countdown is never restarted by a join.
+    const started = maybeStartRound(room.store.snapshot(), room.round, now)
+    if (!started) armCountdown(room.round, room.store.snapshot(), now)
     afterRoundChange(room, previousPhase, now)
 
     socket.on('player:ready', (payload) => {
@@ -288,7 +305,14 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       const before = room.round.phase
       const now = Date.now()
       const players = room.store.snapshot()
-      const reassignment = removePlayer(players, room.tagState, socket.id, now, config.tagCooldownMs)
+      const reassignment = removePlayer(
+        players,
+        room.tagState,
+        socket.id,
+        now,
+        config.tagCooldownMs,
+        config.immunityMs,
+      )
       room.store.remove(socket.id)
       handlePlayerLeft(room.store.snapshot(), room.round, socket.id, now)
       room.limiters.delete(socket.id)
@@ -317,11 +341,23 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       const players = room.store.snapshot()
       const now = Date.now()
       const before = room.round.phase
-      maybeFinishRound(players, room.round, now)
+      maybeFinishRound(players, room.round, now, room.tagState.itId)
+      // The results screen holds briefly, then the countdown advances on the
+      // server clock rather than on client readiness.
+      if (
+        room.round.phase === 'finished' &&
+        now >= room.round.finishedAt + config.resultHoldMs
+      ) {
+        armCountdown(room.round, players, now)
+      }
+      maybeStartRound(players, room.round, now)
 
       if (isRoundActive(room.round)) {
-        const hit = evaluateTag(players, room.tagState, now, config.tagRadius, config.tagCooldownMs)
-        if (hit && applyTag(hit, players, room.tagState, now, config.tagCooldownMs)) {
+        const hit = evaluateTag(players, room.tagState, now, config.tagRadius)
+        if (
+          hit &&
+          applyTag(hit, players, room.tagState, now, config.tagCooldownMs, config.immunityMs)
+        ) {
           broadcastTag(room, hit)
         }
       }
