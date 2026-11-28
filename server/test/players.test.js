@@ -17,6 +17,13 @@ test('a chosen color is kept for the player and shared by publicPlayer', () => {
   assert.equal(publicPlayer(player).color, '#f97316')
 })
 
+test('a stored player can be looked up by socket id for chat attribution', () => {
+  const store = new PlayerStore()
+  const player = store.add('socket-one', '#f97316')
+  assert.equal(store.get('socket-one'), player)
+  assert.equal(store.get('missing'), null)
+})
+
 test('players without a valid choice get distinct default colors', () => {
   const store = new PlayerStore()
   const first = store.add('one')

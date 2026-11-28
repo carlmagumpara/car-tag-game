@@ -44,6 +44,10 @@ export class Room {
     this.round = createRoundState(roundSeconds)
     this.limiters = new Map()
     this.violations = new Map()
+    this.chatLimiters = new Map()
+    this.voiceLimiters = new Map()
+    // socketId -> { muted }, present only while that driver is in voice.
+    this.voicePeers = new Map()
     this.lastRoundSignature = ''
   }
 }

@@ -48,11 +48,16 @@ test('each room owns independent player, tag and round state', () => {
   a.tagState.itId = 'one'
   a.round.phase = 'playing'
   a.limiters.set('one', () => {})
+  a.chatLimiters.set('one', () => {})
+  a.voicePeers.set('one', { muted: false })
 
   assert.equal(b.store.size, 0)
   assert.equal(b.tagState.itId, null)
   assert.equal(b.round.phase, 'waiting')
   assert.equal(b.limiters.size, 0)
+  assert.equal(b.chatLimiters.size, 0)
+  assert.equal(b.voiceLimiters.size, 0)
+  assert.equal(b.voicePeers.size, 0)
 })
 
 test('an invalid code creates a fresh room with a valid generated id', () => {

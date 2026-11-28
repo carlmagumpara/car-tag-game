@@ -91,6 +91,10 @@ export class PlayerStore {
     return player
   }
 
+  get(id) {
+    return this.players.get(id) || null
+  }
+
   update(id, state) {
     const player = this.players.get(id)
     if (!player) return null

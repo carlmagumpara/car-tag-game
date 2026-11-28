@@ -117,3 +117,73 @@ test('health reports active rooms and total players', async () => {
   assert.ok(body.rooms >= 1)
   assert.ok(body.players >= 1)
 })
+
+test('chat is room-scoped and attributed with server-owned identity', async () => {
+  const a = connect('CHATAA', { carColor: '#f97316' })
+  const b = connect('CHATAA')
+  const outsider = connect('CHATBB')
+  await Promise.all([once(a, 'game:init'), once(b, 'game:init'), once(outsider, 'game:init')])
+
+  const receivedByB = once(b, 'chat:message')
+  let outsiderSawMessage = false
+  outsider.on('chat:message', () => {
+    outsiderSawMessage = true
+  })
+
+  a.emit('chat:send', { text: '  hello drivers  ' })
+  const message = await receivedByB
+  assert.equal(message.text, 'hello drivers')
+  assert.equal(message.playerId, a.id)
+  assert.equal(message.color, '#f97316')
+  assert.match(message.name, /^[A-Za-z]+ [A-Za-z]+ \d{2}$/)
+  assert.ok(message.at > 0)
+  await sleep(100)
+  assert.equal(outsiderSawMessage, false)
+})
+
+test('empty chat messages are rejected without a broadcast', async () => {
+  const a = connect('CHATCC')
+  await once(a, 'game:init')
+  const error = once(a, 'game:error')
+  a.emit('chat:send', { text: '   ' })
+  const payload = await error
+  assert.equal(payload.code, 'INVALID_CHAT')
+})
+
+test('voice peers and signaling stay inside the room and require opt-in', async () => {
+  const a = connect('RACERZ')
+  const b = connect('RACERZ')
+  const outsider = connect('RACERX')
+  await Promise.all([once(a, 'game:init'), once(b, 'game:init'), once(outsider, 'game:init')])
+
+  let earlyOfferSeen = false
+  b.on('voice:offer', () => {
+    earlyOfferSeen = true
+  })
+  a.emit('voice:offer', { to: b.id, sdp: 'v=0' })
+  await sleep(80)
+  assert.equal(earlyOfferSeen, false)
+
+  const peersForB = once(b, 'voice:peers')
+  a.emit('voice:state', { enabled: true, muted: false })
+  assert.deepEqual((await peersForB).peers, [{ id: a.id, muted: false }])
+
+  const offerForA = once(a, 'voice:offer')
+  let outsiderSawOffer = false
+  outsider.on('voice:offer', () => {
+    outsiderSawOffer = true
+  })
+  b.emit('voice:state', { enabled: true, muted: true })
+  await once(b, 'voice:peers')
+  const sdp = 'v=0\r\na=sendrecv\r\n'
+  b.emit('voice:offer', { to: a.id, sdp })
+  const offer = await offerForA
+  assert.equal(offer.from, b.id)
+  assert.equal(offer.sdp, sdp)
+  await sleep(80)
+  assert.equal(outsiderSawOffer, false)
+
+  const peersForA = once(a, 'voice:peers')
+  b.disconnect()
+  assert.deepEqual((await peersForA).peers, [{ id: a.id, muted: false }])
+})

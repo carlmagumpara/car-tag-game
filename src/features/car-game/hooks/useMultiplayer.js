@@ -27,6 +27,8 @@ export function useMultiplayer({
   const [playerCount, setPlayerCount] = useState(0)
   const [tagEvent, setTagEvent] = useState(null)
   const [game, setGame] = useState(null)
+  const [chat, setChat] = useState([])
+  const [socketEpoch, setSocketEpoch] = useState(0)
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
@@ -36,6 +38,7 @@ export function useMultiplayer({
       setSelf(null)
       setTagEvent(null)
       setGame(null)
+      setChat([])
       return undefined
     }
 
@@ -47,6 +50,8 @@ export function useMultiplayer({
     setPlayerCount(0)
     setTagEvent(null)
     setGame(null)
+    setChat([])
+    setSocketEpoch((value) => value + 1)
     setActiveRoomId(roomId)
     selfIdRef.current = null
     playersRef.current.clear()
@@ -185,6 +190,7 @@ export function useMultiplayer({
       setPlayerCount(0)
       setTagEvent(null)
       setGame(null)
+      setChat([])
       selfIdRef.current = null
       playersRef.current.clear()
     }
@@ -207,6 +213,11 @@ export function useMultiplayer({
       if (payload?.code === 'SERVER_FULL') setStatus('error')
     }
 
+    const onChatMessage = (payload) => {
+      if (disposed || !payload?.id) return
+      setChat((previous) => [...previous, payload].slice(-50))
+    }
+
     socket.on('connect', onConnect)
     socket.on('game:init', onInit)
     socket.on('player:joined', onJoined)
@@ -215,6 +226,7 @@ export function useMultiplayer({
     socket.on('tag:hit', onTagHit)
     socket.on('game:state', onGameState)
     socket.on('game:error', onGameError)
+    socket.on('chat:message', onChatMessage)
     socket.on('disconnect', onDisconnect)
     socket.on('connect_error', onConnectError)
     socket.on('reconnect_attempt', onReconnectAttempt)
@@ -246,6 +258,12 @@ export function useMultiplayer({
     socket.emit('player:ready', { ready })
   }, [])
 
+  const sendChat = useCallback((text) => {
+    const socket = socketRef.current
+    if (!socket?.connected) return
+    socket.emit('chat:send', { text })
+  }, [])
+
   const reconnect = useCallback(() => {
     const socket = socketRef.current
     if (socket) {
@@ -273,7 +291,11 @@ export function useMultiplayer({
     reconnect,
     tagEvent,
     game,
+    chat,
+    sendChat,
     sendReady,
+    socketRef,
+    socketEpoch,
     roomId: activeRoomId,
   }
 }

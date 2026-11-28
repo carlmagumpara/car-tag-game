@@ -6,7 +6,10 @@ server that lets visitors drive around the same stylized top-down city in real t
 for a timed round (two drivers minimum); the one with the most tags when time runs out wins.
 
 Every game lives in its **own room** with a random six-character code. Create a room, copy its
-link, and only drivers who join with that code see each other or share a scoreboard.
+link, and only drivers who join with that code see each other or share a scoreboard. Each room
+also has **text chat** and optional **voice**: chat is ephemeral and room-scoped, and voice is a
+browser-to-browser WebRTC mesh whose signaling rides on the same Socket.IO connection (audio
+never passes through the server).
 
 - **Frontend:** React 19, Vite 8, Tailwind CSS 3, HTML Canvas, Socket.IO Client. JavaScript/JSX only.
 - **Backend:** Express 5, Socket.IO 4, in-memory player state.
@@ -48,8 +51,17 @@ are deleted so their codes can be reused. A bare `/#/game` URL gets a freshly ge
   seconds left, ready drivers and the final standings.
 - The city is generated from a **fixed seed** (`game/world.js`), so every client and the
   server calculate the same roads, buildings and spawn points without sending map data.
-- React state is used only for UI (connection status, roster, HUD text). The animation loop
+- React state is used only for UI (connection status, roster, HUD text, chat). The animation loop
   touches refs, never React state.
+- **Chat** is ephemeral: `chat:send` is validated and rate-limited server-side, then broadcast as
+  `chat:message` with a server-owned id, name, color and timestamp. Nothing is stored after a
+  disconnect. Messages are keyed to the room, so another code never sees them.
+- **Voice** is an opt-in WebRTC mesh. `useVoice.js` acquires the microphone only after the driver
+  clicks **Join**, tracks participants from `voice:peers`, and creates one peer connection per
+  other driver in voice. The lower socket id sends the offer, avoiding simultaneous offers. The
+  server only validates and relays `voice:offer` / `voice:answer` / `voice:ice` between drivers
+  who are both in voice in the same room; it does not handle audio. Microphone state stays in
+  refs, and remote audio plays through hidden `<audio>` elements.
 
 ### File map
 
@@ -65,8 +77,13 @@ src/
     components/PlayerList.jsx          roster with color swatches
     components/GameControls.jsx        keyboard legend
     components/TouchControls.jsx       mobile pointer buttons
+    components/ChatPanel.jsx           room chat panel, message list and input
+    components/VoiceControls.jsx       join/mute controls and voice errors
     hooks/useKeyboard.js               key state in a ref, blur/visibility cleanup
-    hooks/useMultiplayer.js            socket lifecycle, roster, reconnection
+    hooks/useMultiplayer.js            socket lifecycle, roster, reconnection, chat
+    hooks/useVoice.js                  WebRTC mesh: mic, peers, signaling, cleanup
+    game/chat.js                       client chat input normalization
+    game/voice-config.js               build-time STUN configuration
     game/constants.js                  physics/network/world tuning
     game/world.js                      seeded city, spawn points, clamping
     game/physics.js                    pure vehicle physics and collisions
@@ -82,6 +99,8 @@ server/
   src/create-game-server.js            shared server factory with per-room broadcasting
   src/rooms.js                         RoomManager, room state, shareable id generation
   src/config.js                        env parsing (port, CORS, player/room caps, tag, round tuning)
+  src/chat.js                          pure chat validation (length, single line)
+  src/voice.js                         pure voice state/signal validation
   src/round.js                         pure round rules (ready, timer, winner, scoring window)
   src/tag.js                           pure tag rules (contact, cooldown, reassignment)
   src/validation.js                    movement validation + rate limiter (pure)
@@ -106,6 +125,11 @@ _tmp/                                  scratch verification scripts (gitignored)
   `server/src/players.js` each hold the palette. The chosen color travels in the Socket.IO
   handshake (`carColor` in `auth`/`query`) and the server validates it before assigning it;
   anything invalid falls back to the room's distinct default color.
+- Chat length is duplicated: `src/features/car-game/game/chat.js` and `server/src/chat.js` both
+  use 240 characters. Voice signaling limits live in `server/src/voice.js`; the server relays
+  only to drivers who opted in and are in the same room.
+- Voice uses a public STUN server by default. Override it with `VITE_VOICE_STUN_URL` (a public
+  value, not a secret). Without TURN, drivers behind symmetric NAT may not connect.
 - The dusk city is drawn once into an offscreen canvas at startup (textured asphalt,
   crosswalks, sidewalks, lit windows, roof equipment, parks, streetlights and parked cars)
   and blitted each frame; only cars, lights, skids and particles redraw dynamically.
@@ -173,6 +197,7 @@ never put secrets here):
 | --- | --- | --- |
 | `VITE_GAME_SERVER_URL` | `http://localhost:3001` | Socket.IO server URL. Use `https://…`/`wss://…` in production. |
 | `VITE_BASE_PATH` | `./` | Vite base path. Set `/` for a custom-domain root deployment. |
+| `VITE_VOICE_STUN_URL` | `stun:stun.l.google.com:19302` | Optional public STUN server for WebRTC voice. Not a secret. |
 
 Backend (`server/.env`):
 
@@ -208,7 +233,13 @@ the six-character code, creates the room if needed, joins the socket and only th
 | `player:moved` | server → room | `{ players: Player[] }` | One 20 Hz broadcast per room, not one per client message. |
 | `player:left` | server → room | `{ id: string }` | Sent on disconnect to the room the driver was in. |
 | `tag:hit` | server → room | `{ taggerId, taggedId, itId, reason, at, players: [{ id, isIt, tags }] }` | `reason` is `tag` for contact, `reassign` for the first/leaving tagger. Drives HUD toasts and flash effects. |
-| `game:error` | server → client | `{ code: string, message: string }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (dropped silently), `SERVER_FULL` (room full), `ROOM_UNAVAILABLE` (room cap reached). |
+| `game:error` | server → client | `{ code: string, message: string }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (dropped silently), `INVALID_CHAT` (bad message), `SERVER_FULL` (room full), `ROOM_UNAVAILABLE` (room cap reached). |
+| `chat:send` | client → server | `{ text: string }` | 1–240 chars, single line; rate-limited to 3/s with a 400 ms gap. |
+| `chat:message` | server → room | `{ id, playerId, name, color, text, at }` | Identity and timestamp are server-owned; no history is kept. |
+| `voice:state` | client → server | `{ enabled: boolean, muted: boolean }` | Opt in/out of voice. Only enabled drivers appear in `voice:peers`. |
+| `voice:peers` | server → room | `{ peers: [{ id, muted }] }` | Sent on join, state change and disconnect. |
+| `voice:offer` / `voice:answer` | client → server → target | `{ to, sdp }` | Relayed as `{ from, sdp }` only if both drivers are in voice in the same room. |
+| `voice:ice` | client → server → target | `{ to, candidate }` | ICE candidate relayed as `{ from, candidate }` under the same rules. |
 
 `Player` shape:
 
@@ -264,6 +295,16 @@ are invisible and have separate tags and rounds.
 joining a room. The choice is sent with the connection, so everyone in the room sees your car in
 that color, and it is saved in the browser for next time. Without a valid choice the server gives
 each driver a different default color.
+
+**Chat:** the panel in the lower right shows the last messages in your room. Type a message and
+press Enter or **Send**; it disappears when you leave or reload the page. Messages are capped at
+240 characters and rate-limited, and other rooms never see them.
+
+**Voice:** press **Join** in the voice panel to open your mic (browsers only expose microphone
+access on HTTPS or localhost, and will ask for permission). Everyone else in voice in the same room appears as a participant; **Mute** toggles
+your microphone without leaving the call, and **Leave** releases it. Audio goes directly between
+browsers over WebRTC; the game server only passes connection offers, answers and ICE candidates.
+If you cannot hear another driver, you may be behind a network that needs a TURN server.
 
 **Tag rules:** the driver with the flaming orange outline is "it". Drive into another car to
 tag them — the role and a "Tagged!" flash transfer to them. The HUD shows who is "it" and how
@@ -323,6 +364,9 @@ Important Vercel-specific behavior:
   state and presence across instances.
 - The root `package.json` includes `express`, `socket.io` and `dotenv` because Vercel installs
   root dependencies for Functions; `server/package.json` keeps the standalone copy.
+- Chat and voice signaling use the same room-scoped function, so they are per-instance too.
+  WebRTC audio flows directly between browsers and can continue after the signaling socket
+  closes at `maxDuration`, but reconnecting rebuilds the peer connections.
 
 ### Frontend → GitHub Pages
 
@@ -371,7 +415,7 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 Automated (all executed during implementation):
 
 ```bash
-npm run test:all           # 28 frontend + 28 server tests (incl. rooms, tag and round rules) — all passed
+npm run test:all           # 38 frontend + 40 server tests (rooms, tag, round, chat, voice) — all passed
 npm run build              # production build — passed
 npm run server             # then: curl http://localhost:3001/health
 node _tmp/integration-check.mjs    # two Socket.IO clients: init/join/move/leave/error/reconnect
@@ -402,6 +446,10 @@ Manual test checklist:
 8. Stop and restart the server; both clients should show "Connection lost", then reconnect into
    the same room with fresh state.
 9. Resize the window and test on a phone-sized viewport for touch controls.
+10. Send a chat message in one window: it appears in the other window with the sender's name and
+    color, and a window in a different room sees nothing.
+11. Click **Join** in both windows (allow microphone access): both show two voice participants and
+    hear each other. Use **Mute** in one window, then **Leave**; the participant count updates.
 
 ---
 
@@ -416,6 +464,8 @@ Manual test checklist:
 - Physics/collision work is O(buildings) per frame (~250 buildings) with simple AABB checks.
 - DPR is capped at 2; the tab-hidden case resets the frame clock; effects arrays have hard caps.
 - Server broadcasts one snapshot per 20 Hz tick instead of one message per incoming move.
+- Voice state and chat live in React state only when they change (chat is capped at 50 messages);
+  microphone tracks and peer connections stay in refs, so WebRTC never triggers a render per frame.
 
 ---
 
@@ -428,6 +478,12 @@ Manual test checklist:
 - There is **no authentication or persistent identity**: names, colors and IDs are generated
   per connection. A page reload produces a new driver. Room codes are shareable links, not
   secrets — anyone with a code can join that room.
+- **Chat and voice are unmoderated and open to anyone in the room.** Chat text is validated for
+  length and control characters and React escapes it on display; there are no channels, mentions
+  or deleted messages. Voice signaling is validated and rate-limited, but the audio stream itself
+  is encrypted by WebRTC (DTLS-SRTP) and never passes through the server.
+- `VITE_VOICE_STUN_URL` is public build-time configuration, not a credential. Do not put TURN
+  credentials in `VITE_*` variables; a private TURN URL belongs on the server side.
 - CORS is restricted to explicitly configured origins, but the public game is deliberately
   open to anyone who can load the frontend; abuse at scale needs a proxy/rate limits at the
   hosting layer.
@@ -446,10 +502,14 @@ Manual test checklist:
   unfairly; authoritative physics would close that gap.
 - In-memory state means a server restart clears every room, its tags and all players. On a
   multi-instance host (e.g. Vercel), rooms are also isolated per function instance.
-- Rooms are open to anyone with the code: there is no password or host control, and no chat or
-  persistent scoreboard (tag counts reset each round and on disconnect).
+- Rooms are open to anyone with the code: there is no password or host control. Chat is ephemeral
+  (no history, no delete or moderation) and there is no persistent scoreboard — tag counts reset
+  each round and on disconnect.
+- Voice is a full mesh, so bandwidth grows with the square of the driver count; it is intended for
+  a handful of friends, not a large room. With only public STUN, drivers behind symmetric NAT or
+  strict firewalls may not connect; adding TURN would require server-side credentials.
 - Empty rooms are removed, so a code can be reused later by a different group.
 - Spawn slots repeat after 12 concurrent players in a room.
 - Future work: server-authoritative physics with input messages, proper collision-based tags,
-  shared room state across instances, persistent profiles and scoreboards, and an authoritative
-  drift flag.
+  shared room state across instances, persistent profiles and scoreboards, an authoritative
+  drift flag, voice moderation or an SFU for larger rooms, and optional chat history.

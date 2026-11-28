@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import GameCanvas from './GameCanvas.jsx'
+import ChatPanel from './components/ChatPanel.jsx'
 import GameControls from './components/GameControls.jsx'
 import GameHUD from './components/GameHUD.jsx'
 import PlayerList from './components/PlayerList.jsx'
 import TouchControls from './components/TouchControls.jsx'
+import VoiceControls from './components/VoiceControls.jsx'
 import { getSocketConfig } from './game/socket-config.js'
 import { roomUrl } from './game/room-id.js'
 import { useKeyboard } from './hooks/useKeyboard.js'
 import { useMultiplayer } from './hooks/useMultiplayer.js'
+import { useVoice } from './hooks/useVoice.js'
 
 const socketConfig = getSocketConfig()
 
@@ -51,6 +54,8 @@ export default function CarGame({ onExit, roomId, carColor }) {
   const [paused, setPaused] = useState(false)
   const [hud, setHud] = useState({ speed: 0, drifting: false, x: 0, y: 0 })
   const [copied, setCopied] = useState(false)
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [voiceMuted, setVoiceMuted] = useState(false)
 
   const {
     status,
@@ -63,9 +68,21 @@ export default function CarGame({ onExit, roomId, carColor }) {
     reconnect,
     tagEvent,
     game,
+    chat,
+    sendChat,
     sendReady,
+    socketRef,
+    socketEpoch,
     roomId: activeRoomId,
   } = useMultiplayer({ ...socketConfig, roomId, carColor, enabled: true })
+
+  const voice = useVoice({
+    socketRef,
+    socketEpoch,
+    selfId: self?.id,
+    enabled: voiceEnabled,
+    muted: voiceMuted,
+  })
 
   // Usually the same as the URL code; the server's value wins if a raw client
   // connected without one, so the copied link always points to the real room.
@@ -178,6 +195,19 @@ export default function CarGame({ onExit, roomId, carColor }) {
             <PlayerList players={roster} selfId={self?.id} />
             <GameControls />
             <TouchControls onPress={handleTouch} enabled={!paused && !roundOver} />
+            <div className="absolute bottom-24 right-3 z-20 flex w-60 flex-col gap-2 sm:w-64 md:bottom-4 md:right-4 md:w-72">
+              <ChatPanel messages={chat} onSend={sendChat} enabled={status === 'connected'} />
+              <VoiceControls
+                enabled={voiceEnabled}
+                ready={voice.ready}
+                muted={voiceMuted}
+                participantCount={voice.participants.length}
+                error={voice.error}
+                onToggle={() => setVoiceEnabled((value) => !value)}
+                onToggleMute={() => setVoiceMuted((value) => !value)}
+                onDismissError={voice.clearError}
+              />
+            </div>
           </>
         )}
 

@@ -24,6 +24,9 @@ and the driver with the most tags when the timer expires wins.
   snapshots at 20 Hz. Remote cars are rendered 100 ms in the past and interpolated.
 - **Tag state and round state are server-owned.** Clients never decide who is "it", who scored,
   or who won, and cannot claim a tag themselves.
+- Each room has **ephemeral text chat** and optional **open-mic voice**. Chat is validated and
+  broadcast by the server; voice is a browser-to-browser WebRTC mesh where the server only
+  validates and relays signaling (SDP offers/answers and ICE candidates).
 - All state is **in memory**. Rooms are created on demand, isolated by code, and deleted when
   empty. A server restart clears everything.
 - There are **no user accounts, logins, tokens, or persistent profiles** (see §7).
@@ -70,11 +73,16 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │       │   ├── GameHUD.jsx        speed, connection status, room/ready/timer controls
 │       │   ├── PlayerList.jsx     roster with color swatches and IT/RDY/YOU badges
 │       │   ├── GameControls.jsx   desktop keyboard legend
-│       │   └── TouchControls.jsx  mobile pointer buttons
+│       │   ├── TouchControls.jsx  mobile pointer buttons
+│       │   ├── ChatPanel.jsx      room chat panel, message list and input
+│       │   └── VoiceControls.jsx  join/mute controls and voice errors
 │       ├── hooks/
 │       │   ├── useKeyboard.js     key state in a ref; blur/visibility cleanup
-│       │   └── useMultiplayer.js  socket lifecycle, roster, reconnect, send helpers
+│       │   ├── useMultiplayer.js  socket lifecycle, roster, reconnect, chat, send helpers
+│       │   └── useVoice.js        WebRTC mesh: mic, peers, signaling, cleanup
 │       └── game/                  PURE, DOM-light logic (unit-tested directly by Node)
+│           ├── chat.js            client chat input normalization
+│           ├── voice-config.js    build-time STUN configuration
 │           ├── constants.js       WORLD, PHYSICS, NETWORK, speed display factor, color hexes
 │           ├── world.js           seeded city generation, spawn points, clamping helpers
 │           ├── physics.js         vehicle integration, collisions, speed display
@@ -93,6 +101,8 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │   │   ├── index.js               standalone entry; listen(config.port); SIGINT/SIGTERM shutdown
 │   │   ├── create-game-server.js  shared factory: Express app + Socket.IO + rooms + 20 Hz tick
 │   │   ├── config.js              env parsing + clamps for all tuning values
+│   │   ├── chat.js                PURE chat validation (length, single line)
+│   │   ├── voice.js               PURE voice state/signal validation
 │   │   ├── rooms.js               RoomManager/Room; room id rules; per-room state containers
 │   │   ├── players.js             palette (duplicated), generated names, spawn slots, PlayerStore
 │   │   ├── tag.js                 PURE tag rules: contact, cooldown, reassignment
@@ -102,7 +112,7 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │
 ├── api/game.js                    Vercel Function default export = httpServer from factory
 │                                  socketPath '/api/game', healthPath '/api/game'
-├── tests/                         node:test suites for frontend game modules + live room integration
+├── tests/                         node:test suites for frontend game modules + live room/chat/voice integration
 │
 ├── .github/workflows/deploy.yml   GitHub Pages build/deploy on push to main
 ├── _plans/ _docs/ _runbooks/ _tmp/ scratch folders (gitignored; not deliverables)
@@ -120,6 +130,7 @@ Four pairs of values are duplicated. Change both sides together and add/update a
 | `src/features/car-game/game/room-id.js` (`ROOM_ID_ALPHABET`, pattern) | `server/src/rooms.js` (same exports) | six chars, no `0/O`, `1/I` |
 | `src/features/car-game/game/car-colors.js` (`CAR_COLORS`) | `server/src/players.js` (`CAR_COLORS`) | exact hex values and ids |
 | `src/features/car-game/game/world.js` (`getSpawnPoints`) | `server/src/players.js` (`spawnFor`) | spawn positions on the central road |
+| `src/features/car-game/game/chat.js` (`CHAT_MAX_LENGTH`) | `server/src/chat.js` (`CHAT_MAX_LENGTH`) | 240-character chat limit |
 
 Network timing is mirrored too: `NETWORK.sendIntervalMs = 50`, `NETWORK.serverTickMs = 50`,
 `config.tickMs = 50`. The city seed (`createWorld(seed = 20261127)`) is client-only; the server
@@ -151,9 +162,9 @@ Useful scripts (from root unless noted):
 | `npm run dev` | Vite dev server at `http://localhost:5173` |
 | `npm run server` | Standalone game server at `http://localhost:3001` (`GET /health`) |
 | `npm run build` / `npm run preview` | Production build into `dist/` / preview at `:4173` |
-| `npm test` | 32 frontend/node:test suites (`tests/*.test.js`) |
-| `npm run test:server` | 31 server suites (`server/test/*.test.js`) |
-| `npm run test:all` | both suites (63 tests total at time of writing) |
+| `npm test` | 38 frontend/node:test suites (`tests/*.test.js`) |
+| `npm run test:server` | 40 server suites (`server/test/*.test.js`) |
+| `npm run test:all` | both suites (78 tests total at time of writing) |
 | `cd server && npm run dev` | server with `--watch` auto-restart |
 
 ---
@@ -230,6 +241,8 @@ Useful scripts (from root unless noted):
 | Latest callback without re-subscribing | refs updated in effects | `pausedRef`, `sendMoveRef`, `hudRef`, `tagFlashRef` |
 | URL / navigation | `window.location.hash` + `hashchange` listener | `#/game`, `#/game/<CODE>` |
 | Persistent preference | `localStorage` via `loadCarColor`/`saveCarColor` | key `neon-drive:car-color` |
+| Chat history | React `useState` in `useMultiplayer`, capped at 50 | `chat`, `sendChat`; low-frequency, safe for React |
+| WebRTC voice | refs in `useVoice`, no React state per frame | `localStreamRef`, `peersRef`, hidden `<audio>` elements |
 
 Rules:
 
@@ -272,7 +285,13 @@ There is **no REST API** except two health endpoints. Application integration is
 | `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; ignored while `phase === 'playing'` |
 | `game:state` | server → room | `{ phase, roundSeconds, secondsLeft, endsAt, minPlayers, readyIds, winnerIds, standings }` | Transitions, joins, readiness, leaves, once per countdown second |
 | `tag:hit` | server → room | `{ taggerId, taggedId, itId, reason, at, players: [{ id, isIt, tags }] }` | `reason` = `tag` or `reassign`; drives toasts and flashes |
-| `game:error` | server → client | `{ code, message }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (silent drop), `SERVER_FULL`, `ROOM_UNAVAILABLE` |
+| `game:error` | server → client | `{ code, message }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (silent drop), `INVALID_CHAT`, `SERVER_FULL`, `ROOM_UNAVAILABLE` |
+| `chat:send` | client → server | `{ text }` | 1–240 chars, single line; 400 ms gap, max 3/s |
+| `chat:message` | server → room | `{ id, playerId, name, color, text, at }` | Identity/timestamp server-owned; no history retained |
+| `voice:state` | client → server | `{ enabled, muted }` | Opt in/out; only enabled drivers are participants |
+| `voice:peers` | server → room | `{ peers: [{ id, muted }] }` | On join, state change and disconnect |
+| `voice:offer` / `voice:answer` | client → server → target | `{ to, sdp }` | Relayed as `{ from, sdp }` only within a room to opted-in peers |
+| `voice:ice` | client → server → target | `{ to, candidate }` | Relayed as `{ from, candidate }` under the same rules |
 
 `Player` shape: `{ id, name, color, x, y, angle, speed, isIt, tags, ready }`. `angle` is
 normalized to `[-π, π]`; `speed` is signed px/s. IDs and names are server-generated.
@@ -334,6 +353,10 @@ route — `/api/game/health` is **not** routed).
 - Configuration hygiene: `VITE_*` values are public and embedded in the client bundle — never
   put secrets there. Backend-only values belong in `server/.env` / Vercel server env vars.
   `.env` files are gitignored; only `.env.example` files are committed.
+- Chat and voice inherit the same openness: anyone with the code can read/send messages and join
+  voice. There is no moderation, blocking, or recording. Chat text is escaped by React on display;
+  voice media is encrypted by WebRTC and never relayed as audio by the server.
+- `VITE_VOICE_STUN_URL` is public build-time config. TURN credentials must never go in `VITE_*`.
 - If a task asks for "login", "users", or "protected rooms", treat it as a new feature with
   protocol, persistence, and deployment implications — ask the user for scope first.
 
@@ -355,7 +378,7 @@ route — `/api/game/health` is **not** routed).
   constants. Prefer extending the relevant existing suite over creating a new framework.
 - Verify with:
   ```bash
-  npm run test:all        # 32 frontend + 31 server tests
+  npm run test:all        # 38 frontend + 40 server tests
   npm run build           # production build must succeed
   ```
 - Manual verification lives in `_tmp/*.mjs` scratch Playwright scripts (two isolated browser
@@ -417,6 +440,9 @@ route — `/api/game/health` is **not** routed).
 - Change the Socket.IO event names/payloads, socket path, room-code format, or world dimensions
   unilaterally — these are cross-cutting and deployment-sensitive.
 - Add authentication, persistence, databases, or shared cross-instance state.
+- Add TURN credentials, an SFU, or a managed voice provider — voice is deliberately a public-STUN
+  WebRTC mesh in this project; changing that needs a new service and approval.
+- Add persistent chat history or moderation features without agreement on storage and policy.
 - Import server code into the browser bundle or browser APIs into `server/src`.
 - Move per-frame data into React state or add React renders inside the rAF loop.
 - Change the world seed or physics constants without checking tests, server bounds, and spawns.
@@ -433,6 +459,9 @@ route — `/api/game/health` is **not** routed).
 - In-memory state means restarts clear rooms; on Vercel rooms are isolated per function
   instance and sockets close at the 300 s function duration (the client reconnects).
 - Rooms are open to anyone with the code; spawn slots repeat after 12 players.
+- Chat is in-memory only (50-message client cap, nothing retained server-side), and voice is a
+  full mesh that does not scale to large rooms. Public STUN alone cannot connect some NAT setups;
+  the mic button is required before audio starts and browsers require HTTPS/localhost for it.
 
 ---
 
@@ -458,6 +487,10 @@ route — `/api/game/health` is **not** routed).
 - **Change the protocol:** "We need to add/change a Socket.IO event. List every affected location
   (`create-game-server.js`, `useMultiplayer.js`, consumers, README §4, both test suites,
   `api/game.js` path assumptions) before editing, then implement them together."
+- **Chat/voice changes:** "Update room chat or WebRTC voice while keeping chat ephemeral, the
+  server as signaling-only for voice, and all media/mic state in refs. Mirror the 240-character
+  limit across both `chat.js` files, keep signaling relay room-scoped to opted-in peers, and add
+  tests to `server/test/{chat,voice}.test.js` and `tests/rooms-integration.test.js`."
 - **Touch duplicated constants:** "This change affects [bounds/codes/colors/spawns]. Update both
   the frontend and server copies, run the cross-side test (`tests/room-id.test.js` or the color
   tests), and confirm no other sync points were missed."

@@ -1,6 +1,8 @@
 import express from 'express'
+import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { Server } from 'socket.io'
+import { CHAT_MAX_LENGTH, normalizeChatText } from './chat.js'
 import { config } from './config.js'
 import { normalizeCarColor, publicPlayer } from './players.js'
 import { RoomManager, normalizeRoomId } from './rooms.js'
@@ -20,6 +22,7 @@ import {
   publicTagState,
   removePlayer,
 } from './tag.js'
+import { normalizeVoiceSignal, normalizeVoiceState } from './voice.js'
 import { createRateLimiter, SERVER_BOUNDS, validateMove } from './validation.js'
 
 // Builds the game server without calling listen(), so the same code can run as
@@ -35,6 +38,16 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
 
   function broadcastTag(room, hit) {
     io.to(room.id).emit('tag:hit', { ...hit, players: publicTagState(room.store.snapshot()) })
+  }
+
+  function voicePeersPayload(room) {
+    return {
+      peers: Array.from(room.voicePeers, ([id, state]) => ({ id, muted: state.muted })),
+    }
+  }
+
+  function broadcastVoicePeers(room) {
+    io.to(room.id).emit('voice:peers', voicePeersPayload(room))
   }
 
   function roundSignature(state) {
@@ -142,6 +155,9 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
     const player = room.store.add(socket.id, requestedColor)
     room.limiters.set(socket.id, createRateLimiter())
     room.violations.set(socket.id, 0)
+    // Chat is much slower than movement; voice signaling can burst during ICE.
+    room.chatLimiters.set(socket.id, createRateLimiter({ minIntervalMs: 400, maxPerSecond: 3 }))
+    room.voiceLimiters.set(socket.id, createRateLimiter({ minIntervalMs: 0, maxPerSecond: 50 }))
     socket.join(room.id)
 
     const reassignment = ensureIt(room.store.snapshot(), room.tagState, now, config.tagCooldownMs)
@@ -165,6 +181,9 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
     // Always give the new socket the current phase, even when the signature
     // has not changed since the last broadcast (e.g. joining mid-round).
     socket.emit('game:state', publicRoundState(room.round, room.store.snapshot(), now))
+    // Existing voice participants are sent only to the newcomer; their peers
+    // learn about them when they enable their own mic.
+    socket.emit('voice:peers', voicePeersPayload(room))
 
     // A newcomer is never ready, so this only matters when the previous
     // unready driver left and everyone remaining had already readied up.
@@ -177,6 +196,58 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       setPlayerReady(room.store.snapshot(), room.round, socket.id, ready, Date.now())
       afterRoundChange(room, before, Date.now())
     })
+
+    // Chat is room-scoped and ephemeral: no history is kept after disconnect.
+    socket.on('chat:send', (payload) => {
+      const text = normalizeChatText(payload?.text)
+      if (!text) {
+        socket.emit('game:error', {
+          code: 'INVALID_CHAT',
+          message: `Messages must be 1-${CHAT_MAX_LENGTH} characters and on one line.`,
+        })
+        return
+      }
+      const limiter = room.chatLimiters.get(socket.id)
+      if (limiter && !limiter.allow(Date.now())) return
+      const player = room.store.get(socket.id)
+      if (!player) return
+      io.to(room.id).emit('chat:message', {
+        id: randomUUID(),
+        playerId: socket.id,
+        name: player.name,
+        color: player.color,
+        text,
+        at: Date.now(),
+      })
+    })
+
+    // WebRTC signaling is relayed, never interpreted. Both ends must be in
+    // voice and in the same room, so a socket cannot signal into another game.
+    function relayVoice(type, payload, kind) {
+      const signal = normalizeVoiceSignal(payload, kind)
+      if (!signal || !room.voicePeers.has(socket.id)) return
+      const target = io.sockets.sockets.get(signal.to)
+      if (!target || !target.rooms.has(room.id)) return
+      if (!room.voicePeers.has(signal.to)) return
+      const limiter = room.voiceLimiters.get(socket.id)
+      if (limiter && !limiter.allow(Date.now())) return
+      io.to(signal.to).emit(type, {
+        from: socket.id,
+        [kind === 'sdp' ? 'sdp' : 'candidate']: kind === 'sdp' ? signal.sdp : signal.candidate,
+      })
+    }
+
+    socket.on('voice:state', (payload) => {
+      const state = normalizeVoiceState(payload)
+      if (!state) return
+      if (state.enabled) room.voicePeers.set(socket.id, { muted: state.muted })
+      else room.voicePeers.delete(socket.id)
+      broadcastVoicePeers(room)
+    })
+
+    socket.on('voice:offer', (payload) => relayVoice('voice:offer', payload, 'sdp'))
+    socket.on('voice:answer', (payload) => relayVoice('voice:answer', payload, 'sdp'))
+    socket.on('voice:ice', (payload) => relayVoice('voice:ice', payload, 'candidate'))
 
     socket.on('player:move', (payload) => {
       const result = validateMove(payload, {
@@ -207,7 +278,11 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       handlePlayerLeft(room.store.snapshot(), room.round, socket.id, now)
       room.limiters.delete(socket.id)
       room.violations.delete(socket.id)
+      room.chatLimiters.delete(socket.id)
+      room.voiceLimiters.delete(socket.id)
+      const wasInVoice = room.voicePeers.delete(socket.id)
       io.to(room.id).emit('player:left', { id: socket.id })
+      if (wasInVoice) broadcastVoicePeers(room)
       if (reassignment) broadcastTag(room, reassignment)
       afterRoundChange(room, before, now)
       // An empty room has nothing left to share, so drop it and reclaim the code.
