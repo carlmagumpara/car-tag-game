@@ -229,7 +229,9 @@ A client requests a room through `auth: { roomId, carColor, name }` (or
 if needed, joins the socket and only then sends `game:init`. A missing/invalid code creates a
 fresh room whose id is returned in `game:init`. `name` is normalized (24 characters, one line),
 and duplicate names in a room get a numeric suffix; an absent or invalid name falls back to a
-generated one so raw clients still work.
+generated one so raw clients still work. A socket arriving while the room's round is `playing`
+is refused with `GAME_IN_PROGRESS` and disconnected; waiting rooms and finished rooms can still
+be joined.
 
 | Event | Direction | Payload | Notes |
 | --- | --- | --- | --- |
@@ -241,7 +243,7 @@ generated one so raw clients still work.
 | `player:moved` | server → room | `{ players: Player[] }` | One 20 Hz broadcast per room, not one per client message. |
 | `player:left` | server → room | `{ id: string }` | Sent on disconnect to the room the driver was in. |
 | `tag:hit` | server → room | `{ taggerId, taggedId, itId, reason, at, players: [{ id, isIt, tags }] }` | `reason` is `tag` for contact, `reassign` for the first/leaving tagger. Drives HUD toasts and flash effects. |
-| `game:error` | server → client | `{ code: string, message: string }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (dropped silently), `INVALID_CHAT` (bad message), `SERVER_FULL` (room full), `ROOM_UNAVAILABLE` (room cap reached). |
+| `game:error` | server → client | `{ code: string, message: string }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (dropped silently), `INVALID_CHAT` (bad message), `SERVER_FULL` (room full), `ROOM_UNAVAILABLE` (room cap reached), `GAME_IN_PROGRESS` (round running). |
 | `chat:send` | client → server | `{ text: string }` | 1–240 chars, single line; rate-limited to 3/s with a 400 ms gap. |
 | `chat:message` | server → room | `{ id, playerId, name, color, text, at }` | Identity and timestamp are server-owned; no history is kept. |
 | `voice:state` | client → server | `{ enabled: boolean, muted: boolean }` | Opt in/out of voice. Only enabled drivers appear in `voice:peers`. |
@@ -329,7 +331,8 @@ indicate you want to play. The timer starts only when there are at least two dri
 and **every** connected driver is ready. Tags scored before the timer starts do not count. When
 time runs out the driver with the most tags wins; ties share the win, and a scoreless round has
 no winner. Press ready again to start another round. If the room drops below two drivers while a
-round is running, the round is aborted and scores are cleared.
+round is running, the round is aborted and scores are cleared. New drivers cannot join a room
+while its round is running; they must wait for the round to finish (or use a different code).
 
 Game keys are only intercepted while the game is active; the landing page and normal
 portfolio navigation are unaffected. Touch buttons use pointer capture and release on
@@ -419,6 +422,7 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 | Players with the same code cannot see each other | They may be on different function instances; add Redis/pub-sub for shared room state. |
 | "Copy link" gives the wrong room | The code comes from the server's `game:init`; check the HUD shows the same code as the URL. |
 | Room cap reached | Raise `MAX_ROOMS` or wait for empty rooms to expire; existing codes still work. |
+| "A round is already in progress" | The room's timer is running. Wait for it to finish, then press **Try again**; joining mid-round is blocked. |
 | Server restarts / players drop | Expected: state is in memory; clients reconnect automatically into a fresh room with the same code. |
 
 ---
@@ -428,7 +432,7 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 Automated (all executed during implementation):
 
 ```bash
-npm run test:all           # 42 frontend + 42 server tests (rooms, tag, round, chat, voice, names) — all passed
+npm run test:all           # 43 frontend + 43 server tests (rooms, tag, round, chat, voice, names, join gate) — all passed
 npm run build              # production build — passed
 npm run server             # then: curl http://localhost:3001/health
 node _tmp/integration-check.mjs    # two Socket.IO clients: init/join/move/leave/error/reconnect
@@ -466,6 +470,8 @@ Manual test checklist:
     hear each other. Use **Mute** in one window, then **Leave**; the participant count updates.
 12. Open a share link in a fresh browser profile: the name prompt appears before the game connects.
     Choose a name and confirm the car joins the room in the link.
+13. Start a round, then open the same link in a third window: it is refused with "A round is already
+    in progress". When the round ends, the same link connects normally.
 
 ---
 
@@ -518,7 +524,8 @@ Manual test checklist:
 - Because physics is client-side, a modified client can still get close enough to tag
   unfairly; authoritative physics would close that gap.
 - In-memory state means a server restart clears every room, its tags and all players. On a
-  multi-instance host (e.g. Vercel), rooms are also isolated per function instance.
+  multi-instance host (e.g. Vercel), rooms are also isolated per function instance. Because a
+  reconnect is a new join, a driver who drops mid-round cannot re-enter until that round ends.
 - Rooms are open to anyone with the code: there is no password or host control. Chat is ephemeral
   (no history, no delete or moderation) and there is no persistent scoreboard — tag counts reset
   each round and on disconnect.

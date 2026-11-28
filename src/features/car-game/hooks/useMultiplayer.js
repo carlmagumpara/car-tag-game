@@ -19,6 +19,7 @@ export function useMultiplayer({
   const playersRef = useRef(new Map())
   const socketRef = useRef(null)
   const selfIdRef = useRef(null)
+  const rejectedRef = useRef(false)
 
   const [status, setStatus] = useState('connecting')
   const [error, setError] = useState(null)
@@ -55,6 +56,7 @@ export function useMultiplayer({
     setSocketEpoch((value) => value + 1)
     setActiveRoomId(roomId)
     selfIdRef.current = null
+    rejectedRef.current = false
     playersRef.current.clear()
 
     // auth is used by the browser; query also works for raw clients/health checks.
@@ -187,7 +189,13 @@ export function useMultiplayer({
 
     const onDisconnect = (reason) => {
       if (disposed) return
-      setStatus(reason === 'io client disconnect' ? 'offline' : 'reconnecting')
+      setStatus(
+        rejectedRef.current
+          ? 'error'
+          : reason === 'io client disconnect'
+            ? 'offline'
+            : 'reconnecting',
+      )
       setSelf(null)
       setRoster([])
       setPlayerCount(0)
@@ -205,7 +213,7 @@ export function useMultiplayer({
     }
 
     const onReconnectAttempt = () => {
-      if (disposed) return
+      if (disposed || rejectedRef.current) return
       setStatus('reconnecting')
       setError(null)
     }
@@ -213,7 +221,13 @@ export function useMultiplayer({
     const onGameError = (payload) => {
       if (disposed) return
       setError(payload?.message || 'The game server reported an error.')
-      if (payload?.code === 'SERVER_FULL') setStatus('error')
+      if (payload?.code === 'SERVER_FULL' || payload?.code === 'GAME_IN_PROGRESS') {
+        // The server closes the socket for these; keep the error visible and
+        // stop the automatic retry loop until the driver clicks Try again.
+        rejectedRef.current = true
+        socket.io.opts.reconnection = false
+        setStatus('error')
+      }
     }
 
     const onChatMessage = (payload) => {
@@ -270,6 +284,8 @@ export function useMultiplayer({
   const reconnect = useCallback(() => {
     const socket = socketRef.current
     if (socket) {
+      rejectedRef.current = false
+      socket.io.opts.reconnection = true
       socket.disconnect()
       socket.connect()
     } else {

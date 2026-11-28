@@ -166,9 +166,9 @@ Useful scripts (from root unless noted):
 | `npm run dev` | Vite dev server at `http://localhost:5173` |
 | `npm run server` | Standalone game server at `http://localhost:3001` (`GET /health`) |
 | `npm run build` / `npm run preview` | Production build into `dist/` / preview at `:4173` |
-| `npm test` | 42 frontend/node:test suites (`tests/*.test.js`) |
-| `npm run test:server` | 42 server suites (`server/test/*.test.js`) |
-| `npm run test:all` | both suites (84 tests total at time of writing) |
+| `npm test` | 43 frontend/node:test suites (`tests/*.test.js`) |
+| `npm run test:server` | 43 server suites (`server/test/*.test.js`) |
+| `npm run test:all` | both suites (86 tests total at time of writing) |
 | `cd server && npm run dev` | server with `--watch` auto-restart |
 
 ---
@@ -290,7 +290,7 @@ There is **no REST API** except two health endpoints. Application integration is
 | `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; ignored while `phase === 'playing'` |
 | `game:state` | server → room | `{ phase, roundSeconds, secondsLeft, endsAt, minPlayers, readyIds, winnerIds, standings }` | Transitions, joins, readiness, leaves, once per countdown second |
 | `tag:hit` | server → room | `{ taggerId, taggedId, itId, reason, at, players: [{ id, isIt, tags }] }` | `reason` = `tag` or `reassign`; drives toasts and flashes |
-| `game:error` | server → client | `{ code, message }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (silent drop), `INVALID_CHAT`, `SERVER_FULL`, `ROOM_UNAVAILABLE` |
+| `game:error` | server → client | `{ code, message }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (silent drop), `INVALID_CHAT`, `SERVER_FULL`, `ROOM_UNAVAILABLE`, `GAME_IN_PROGRESS` |
 | `chat:send` | client → server | `{ text }` | 1–240 chars, single line; 400 ms gap, max 3/s |
 | `chat:message` | server → room | `{ id, playerId, name, color, text, at }` | Identity/timestamp server-owned; no history retained |
 | `voice:state` | client → server | `{ enabled, muted }` | Opt in/out; only enabled drivers are participants |
@@ -310,6 +310,9 @@ normalized to `[-π, π]`; `speed` is signed px/s. IDs and names are server-gene
   or on direct share links via `NameGate`. Create/Join stay disabled until a valid name exists.
   The name is deliberately not persisted.
 - Missing/invalid room code creates a fresh room whose id is returned in `game:init`.
+- A socket is refused with `GAME_IN_PROGRESS` and disconnected when `canJoinRound(room.round)` is
+  false (phase `playing`). Joining a waiting or finished room remains allowed. The client keeps the
+  error overlay visible, disables auto-retry for that rejection, and re-enables it on manual retry.
 - `getSocketConfig()` in `src/features/car-game/game/socket-config.js` reads
   `VITE_GAME_SERVER_URL` (fallback: same origin in PROD, `http://localhost:3001` in dev),
   `VITE_GAME_SOCKET_PATH` (default `/socket.io`), and `VITE_GAME_TRANSPORTS` (default
@@ -389,7 +392,7 @@ route — `/api/game/health` is **not** routed).
   constants. Prefer extending the relevant existing suite over creating a new framework.
 - Verify with:
   ```bash
-  npm run test:all        # 42 frontend + 42 server tests
+  npm run test:all        # 43 frontend + 43 server tests
   npm run build           # production build must succeed
   ```
 - Manual verification lives in `_tmp/*.mjs` scratch Playwright scripts (two isolated browser
@@ -470,6 +473,8 @@ route — `/api/game/health` is **not** routed).
 - In-memory state means restarts clear rooms; on Vercel rooms are isolated per function
   instance and sockets close at the 300 s function duration (the client reconnects).
 - Rooms are open to anyone with the code; spawn slots repeat after 12 players.
+- A driver who disconnects mid-round cannot rejoin until that round ends, because reconnecting is
+  a new join and the server refuses newcomers while `phase === 'playing'`.
 - Chat is in-memory only (50-message client cap, nothing retained server-side), and voice is a
   full mesh that does not scale to large rooms. Public STUN alone cannot connect some NAT setups;
   the mic button is required before audio starts and browsers require HTTPS/localhost for it.

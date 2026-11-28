@@ -38,6 +38,12 @@ export function isRoundActive(round) {
   return round.phase === 'playing'
 }
 
+// A room is closed to newcomers only while the timer is running. Joining a
+// lobby or a finished round (players are readied up again) stays allowed.
+export function canJoinRound(round) {
+  return !isRoundActive(round)
+}
+
 function resetRound(players, round) {
   round.phase = 'waiting'
   round.endsAt = 0

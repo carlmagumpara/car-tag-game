@@ -8,6 +8,7 @@ import { normalizeCarColor, publicPlayer } from './players.js'
 import { RoomManager, normalizeRoomId } from './rooms.js'
 import {
   MIN_PLAYERS,
+  canJoinRound,
   handlePlayerLeft,
   isRoundActive,
   maybeFinishRound,
@@ -139,6 +140,17 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       socket.emit('game:error', {
         code: 'SERVER_FULL',
         message: `Room ${room.id} is full. Ask for a new code or try again shortly.`,
+      })
+      socket.disconnect(true)
+      return
+    }
+
+    // Only the drivers who started a round may play it. A newcomer joining
+    // mid-round would see cars already in motion and could skew the scoring.
+    if (!canJoinRound(room.round)) {
+      socket.emit('game:error', {
+        code: 'GAME_IN_PROGRESS',
+        message: `A round is already in progress in room ${room.id}. Wait for it to finish and try again.`,
       })
       socket.disconnect(true)
       return

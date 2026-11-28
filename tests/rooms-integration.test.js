@@ -7,6 +7,7 @@ const ROOM_ID_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/
 
 let httpServer
 let closeServer
+let rooms
 let port
 const sockets = []
 
@@ -32,6 +33,25 @@ function once(socket, event, timeoutMs = 3000) {
   })
 }
 
+function waitForPhase(socket, phase, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error(`Timed out waiting for phase ${phase}`))
+    }, timeoutMs)
+    const handler = (payload) => {
+      if (payload?.phase !== phase) return
+      cleanup()
+      resolve(payload)
+    }
+    function cleanup() {
+      clearTimeout(timer)
+      socket.off('game:state', handler)
+    }
+    socket.on('game:state', handler)
+  })
+}
+
 function connect(roomId, extraAuth = {}) {
   const socket = io(`http://127.0.0.1:${port}`, {
     transports: ['websocket'],
@@ -46,6 +66,7 @@ before(async () => {
   const server = createGameServer()
   httpServer = server.httpServer
   closeServer = server.close
+  rooms = server.rooms
   await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
   port = httpServer.address().port
 })
@@ -201,4 +222,29 @@ test('voice peers and signaling stay inside the room and require opt-in', async 
   const peersForA = once(a, 'voice:peers')
   b.disconnect()
   assert.deepEqual((await peersForA).peers, [{ id: a.id, muted: false }])
+})
+
+test('a newcomer is refused while a round is playing and allowed once it ends', async () => {
+  const a = connect('PLAYAA')
+  const b = connect('PLAYAA')
+  await Promise.all([once(a, 'game:init'), once(b, 'game:init')])
+
+  const started = waitForPhase(a, 'playing')
+  a.emit('player:ready', { ready: true })
+  b.emit('player:ready', { ready: true })
+  await started
+
+  const blocked = connect('PLAYAA')
+  const error = await once(blocked, 'game:error')
+  assert.equal(error.code, 'GAME_IN_PROGRESS')
+  assert.match(error.message, /round is already in progress/)
+
+  // Force the round to expire so the gate can be checked on the other side.
+  rooms.get('PLAYAA').round.endsAt = Date.now() - 1
+  await waitForPhase(a, 'finished')
+
+  const accepted = connect('PLAYAA')
+  const init = await once(accepted, 'game:init')
+  assert.equal(init.roomId, 'PLAYAA')
+  assert.ok(init.players.some((player) => player.id === a.id))
 })

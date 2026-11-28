@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  canJoinRound,
   createRoundState,
   handlePlayerLeft,
   isRoundActive,
@@ -25,6 +26,15 @@ test('a new round waits for players and reports the default 30 seconds', () => {
   assert.equal(state.secondsLeft, 30)
   assert.equal(state.minPlayers, 2)
   assert.deepEqual(state.readyIds, [])
+})
+
+test('a room is closed only while the round timer is running', () => {
+  const round = createRoundState(30)
+  assert.equal(canJoinRound(round), true)
+  round.phase = 'playing'
+  assert.equal(canJoinRound(round), false)
+  round.phase = 'finished'
+  assert.equal(canJoinRound(round), true)
 })
 
 test('one driver cannot start the timer, even when ready', () => {
