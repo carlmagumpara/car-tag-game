@@ -50,7 +50,7 @@ function Spinner() {
   )
 }
 
-export default function CarGame({ onExit, roomId, carColor }) {
+export default function CarGame({ onExit, roomId, carColor, driverName }) {
   const [paused, setPaused] = useState(false)
   const [hud, setHud] = useState({ speed: 0, drifting: false, x: 0, y: 0 })
   const [copied, setCopied] = useState(false)
@@ -74,7 +74,7 @@ export default function CarGame({ onExit, roomId, carColor }) {
     socketRef,
     socketEpoch,
     roomId: activeRoomId,
-  } = useMultiplayer({ ...socketConfig, roomId, carColor, enabled: true })
+  } = useMultiplayer({ ...socketConfig, roomId, carColor, driverName, enabled: true })
 
   const voice = useVoice({
     socketRef,

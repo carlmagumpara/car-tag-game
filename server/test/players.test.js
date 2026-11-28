@@ -17,6 +17,20 @@ test('a chosen color is kept for the player and shared by publicPlayer', () => {
   assert.equal(publicPlayer(player).color, '#f97316')
 })
 
+test('a requested name is kept and normalized', () => {
+  const store = new PlayerStore()
+  assert.equal(store.add('one', null, '  Ada   Racer  ').name, 'Ada Racer')
+  assert.equal(store.add('two', null, 'Cosmic Panda 7').name, 'Cosmic Panda 7')
+})
+
+test('duplicate requested names get a suffix and invalid names fall back to random', () => {
+  const store = new PlayerStore()
+  assert.equal(store.add('one', null, 'Ada Racer').name, 'Ada Racer')
+  assert.equal(store.add('two', null, 'Ada Racer').name, 'Ada Racer 2')
+  assert.match(store.add('three', null, '  ').name, /^[A-Za-z]+ [A-Za-z]+ \d{2}$/)
+  assert.match(store.get('three').name, /^[A-Za-z]+ [A-Za-z]+ \d{2}$/)
+})
+
 test('a stored player can be looked up by socket id for chat attribution', () => {
   const store = new PlayerStore()
   const player = store.add('socket-one', '#f97316')

@@ -75,13 +75,16 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │       │   ├── GameControls.jsx   desktop keyboard legend
 │       │   ├── TouchControls.jsx  mobile pointer buttons
 │       │   ├── ChatPanel.jsx      room chat panel, message list and input
-│       │   └── VoiceControls.jsx  join/mute controls and voice errors
+│       │   ├── VoiceControls.jsx  join/mute controls and voice errors
+│       │   ├── NameField.jsx      name input + Random button
+│       │   └── NameGate.jsx       name prompt for direct share links
 │       ├── hooks/
 │       │   ├── useKeyboard.js     key state in a ref; blur/visibility cleanup
 │       │   ├── useMultiplayer.js  socket lifecycle, roster, reconnect, chat, send helpers
 │       │   └── useVoice.js        WebRTC mesh: mic, peers, signaling, cleanup
 │       └── game/                  PURE, DOM-light logic (unit-tested directly by Node)
 │           ├── chat.js            client chat input normalization
+│           ├── player-name.js     random name + name normalization
 │           ├── voice-config.js    build-time STUN configuration
 │           ├── constants.js       WORLD, PHYSICS, NETWORK, speed display factor, color hexes
 │           ├── world.js           seeded city generation, spawn points, clamping helpers
@@ -131,6 +134,7 @@ Four pairs of values are duplicated. Change both sides together and add/update a
 | `src/features/car-game/game/car-colors.js` (`CAR_COLORS`) | `server/src/players.js` (`CAR_COLORS`) | exact hex values and ids |
 | `src/features/car-game/game/world.js` (`getSpawnPoints`) | `server/src/players.js` (`spawnFor`) | spawn positions on the central road |
 | `src/features/car-game/game/chat.js` (`CHAT_MAX_LENGTH`) | `server/src/chat.js` (`CHAT_MAX_LENGTH`) | 240-character chat limit |
+| `src/features/car-game/game/player-name.js` (`PLAYER_NAME_MAX_LENGTH`) | `server/src/players.js` (same export) | 24-character single-line names |
 
 Network timing is mirrored too: `NETWORK.sendIntervalMs = 50`, `NETWORK.serverTickMs = 50`,
 `config.tickMs = 50`. The city seed (`createWorld(seed = 20261127)`) is client-only; the server
@@ -162,9 +166,9 @@ Useful scripts (from root unless noted):
 | `npm run dev` | Vite dev server at `http://localhost:5173` |
 | `npm run server` | Standalone game server at `http://localhost:3001` (`GET /health`) |
 | `npm run build` / `npm run preview` | Production build into `dist/` / preview at `:4173` |
-| `npm test` | 38 frontend/node:test suites (`tests/*.test.js`) |
-| `npm run test:server` | 40 server suites (`server/test/*.test.js`) |
-| `npm run test:all` | both suites (78 tests total at time of writing) |
+| `npm test` | 42 frontend/node:test suites (`tests/*.test.js`) |
+| `npm run test:server` | 42 server suites (`server/test/*.test.js`) |
+| `npm run test:all` | both suites (84 tests total at time of writing) |
 | `cd server && npm run dev` | server with `--watch` auto-restart |
 
 ---
@@ -240,6 +244,7 @@ Useful scripts (from root unless noted):
 | Hot-path mutable data | `useRef` | `playersRef`, `inputRef`, `socketRef`, `selfIdRef`, `ctxRef`, `cameraRef`, `skidsRef`, `particlesRef` |
 | Latest callback without re-subscribing | refs updated in effects | `pausedRef`, `sendMoveRef`, `hudRef`, `tagFlashRef` |
 | URL / navigation | `window.location.hash` + `hashchange` listener | `#/game`, `#/game/<CODE>` |
+| Name choice | local draft in `Landing`/`NameGate`, committed in `App` | not persisted; cleared on returning home |
 | Persistent preference | `localStorage` via `loadCarColor`/`saveCarColor` | key `neon-drive:car-color` |
 | Chat history | React `useState` in `useMultiplayer`, capped at 50 | `chat`, `sendChat`; low-frequency, safe for React |
 | WebRTC voice | refs in `useVoice`, no React state per frame | `localStreamRef`, `peersRef`, hidden `<audio>` elements |
@@ -298,8 +303,12 @@ normalized to `[-π, π]`; `speed` is signed px/s. IDs and names are server-gene
 
 ### Handshake
 
-- Browser sockets pass `auth: { roomId, carColor }`; raw clients/health checks use
-  `query: { room, carColor }`. The server reads `auth.roomId ?? query.room`.
+- Browser sockets pass `auth: { roomId, carColor, name }`; raw clients/health checks use
+  `query: { room, carColor, name }`. The server reads `auth.roomId ?? query.room` and
+  `auth.name ?? query.name`, then normalizes the name and makes duplicates unique per room.
+- A name is chosen before connecting: on the landing page via `NameField` (type or **Random**),
+  or on direct share links via `NameGate`. Create/Join stay disabled until a valid name exists.
+  The name is deliberately not persisted.
 - Missing/invalid room code creates a fresh room whose id is returned in `game:init`.
 - `getSocketConfig()` in `src/features/car-game/game/socket-config.js` reads
   `VITE_GAME_SERVER_URL` (fallback: same origin in PROD, `http://localhost:3001` in dev),
@@ -338,9 +347,11 @@ route — `/api/game/health` is **not** routed).
 **There is no authentication system.** Do not invent one without a design discussion.
 
 - No accounts, passwords, tokens, JWTs, sessions, cookies, or OAuth. No user identity persists
-  across page reloads.
-- A "player" is created per socket connection in `PlayerStore.add`: id = `socket.id`, name
-  generated from adjective/noun/number lists, color from the handshake or a distinct default.
+  across page reloads. A driver name is chosen per visit and sent in the handshake; it is never
+  stored and duplicates are suffixed by the server.
+- A "player" is created per socket connection in `PlayerStore.add`: id = `socket.id`, name from
+  the handshake (normalized, duplicates suffixed) or generated from adjective/noun/number lists,
+  color from the handshake or a distinct default.
 - A room code functions as a shareable capability link, not a secret. Anyone with the code can
   join; there is no password, host role, or kick control.
 - Authorization is limited to structural rules enforced by the server:
@@ -378,7 +389,7 @@ route — `/api/game/health` is **not** routed).
   constants. Prefer extending the relevant existing suite over creating a new framework.
 - Verify with:
   ```bash
-  npm run test:all        # 38 frontend + 40 server tests
+  npm run test:all        # 42 frontend + 42 server tests
   npm run build           # production build must succeed
   ```
 - Manual verification lives in `_tmp/*.mjs` scratch Playwright scripts (two isolated browser

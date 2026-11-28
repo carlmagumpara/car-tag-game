@@ -150,9 +150,12 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       socket.handshake.auth?.carColor ?? socket.handshake.query?.carColor,
       null,
     )
+    // The client asks the driver to choose a name before joining; invalid or
+    // absent names still get a generated one so raw clients keep working.
+    const requestedName = socket.handshake.auth?.name ?? socket.handshake.query?.name
     const previousPhase = room.round.phase
     const now = Date.now()
-    const player = room.store.add(socket.id, requestedColor)
+    const player = room.store.add(socket.id, requestedColor, requestedName)
     room.limiters.set(socket.id, createRateLimiter())
     room.violations.set(socket.id, 0)
     // Chat is much slower than movement; voice signaling can burst during ICE.

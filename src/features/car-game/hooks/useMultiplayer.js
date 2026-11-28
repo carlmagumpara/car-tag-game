@@ -13,6 +13,7 @@ export function useMultiplayer({
   transports = DEFAULT_TRANSPORTS,
   roomId = null,
   carColor = null,
+  driverName = null,
   enabled = true,
 }) {
   const playersRef = useRef(new Map())
@@ -60,10 +61,12 @@ export function useMultiplayer({
     const auth = {
       ...(roomId ? { roomId } : {}),
       ...(carColor ? { carColor } : {}),
+      ...(driverName ? { name: driverName } : {}),
     }
     const query = {
       ...(roomId ? { room: roomId } : {}),
       ...(carColor ? { carColor } : {}),
+      ...(driverName ? { name: driverName } : {}),
     }
 
     const socket = io(serverUrl, {
@@ -239,7 +242,7 @@ export function useMultiplayer({
       selfIdRef.current = null
       playersRef.current.clear()
     }
-  }, [serverUrl, socketPath, transports, roomId, carColor, enabled, attempt])
+  }, [serverUrl, socketPath, transports, roomId, carColor, driverName, enabled, attempt])
 
   const sendMove = useCallback((state) => {
     const socket = socketRef.current

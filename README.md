@@ -79,10 +79,13 @@ src/
     components/TouchControls.jsx       mobile pointer buttons
     components/ChatPanel.jsx           room chat panel, message list and input
     components/VoiceControls.jsx       join/mute controls and voice errors
+    components/NameField.jsx           name input + Random button
+    components/NameGate.jsx            name prompt for direct share links
     hooks/useKeyboard.js               key state in a ref, blur/visibility cleanup
     hooks/useMultiplayer.js            socket lifecycle, roster, reconnection, chat
     hooks/useVoice.js                  WebRTC mesh: mic, peers, signaling, cleanup
     game/chat.js                       client chat input normalization
+    game/player-name.js                random name + name normalization
     game/voice-config.js               build-time STUN configuration
     game/constants.js                  physics/network/world tuning
     game/world.js                      seeded city, spawn points, clamping
@@ -126,8 +129,10 @@ _tmp/                                  scratch verification scripts (gitignored)
   handshake (`carColor` in `auth`/`query`) and the server validates it before assigning it;
   anything invalid falls back to the room's distinct default color.
 - Chat length is duplicated: `src/features/car-game/game/chat.js` and `server/src/chat.js` both
-  use 240 characters. Voice signaling limits live in `server/src/voice.js`; the server relays
-  only to drivers who opted in and are in the same room.
+  use 240 characters. Driver-name rules are duplicated in `game/player-name.js` and
+  `server/src/players.js` (24 characters, single line) for the same reason. Voice signaling limits
+  live in `server/src/voice.js`; the server relays only to drivers who opted in and are in the
+  same room.
 - Voice uses a public STUN server by default. Override it with `VITE_VOICE_STUN_URL` (a public
   value, not a secret). Without TURN, drivers behind symmetric NAT may not connect.
 - The dusk city is drawn once into an offscreen canvas at startup (textured asphalt,
@@ -219,9 +224,12 @@ are gitignored except the examples.
 ## 4. Socket.IO event protocol
 
 All events use JSON payloads. The server assigns the player ID; clients never choose one.
-A client requests a room through `auth: { roomId }` (or `query: { room }`). The server validates
-the six-character code, creates the room if needed, joins the socket and only then sends
-`game:init`. A missing/invalid code creates a fresh room whose id is returned in `game:init`.
+A client requests a room through `auth: { roomId, carColor, name }` (or
+`query: { room, carColor, name }`). The server validates the six-character code, creates the room
+if needed, joins the socket and only then sends `game:init`. A missing/invalid code creates a
+fresh room whose id is returned in `game:init`. `name` is normalized (24 characters, one line),
+and duplicate names in a room get a numeric suffix; an absent or invalid name falls back to a
+generated one so raw clients still work.
 
 | Event | Direction | Payload | Notes |
 | --- | --- | --- | --- |
@@ -285,6 +293,11 @@ the six-character code, creates the room if needed, joins the socket and only th
 | Handbrake drift | `Space` | DRIFT |
 | Pause / resume | `Esc` or Pause button | Pause button |
 | Leave game | Exit button | Exit button |
+
+**Your name:** type a driver name or click **Random** before you can create or join a room — both
+buttons stay disabled until a name is chosen. Opening a shared link goes straight to a short name
+prompt for the same choice, then connects you to that room. Names are unique within a room
+(a suffix is added if someone else already has it) and are not saved between visits.
 
 **Rooms:** click **Create a room** on the landing page to get a random six-character code. Share
 the code or use **Copy link** in the HUD; anyone opening that link joins the same game. Enter a
@@ -415,7 +428,7 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 Automated (all executed during implementation):
 
 ```bash
-npm run test:all           # 38 frontend + 40 server tests (rooms, tag, round, chat, voice) — all passed
+npm run test:all           # 42 frontend + 42 server tests (rooms, tag, round, chat, voice, names) — all passed
 npm run build              # production build — passed
 npm run server             # then: curl http://localhost:3001/health
 node _tmp/integration-check.mjs    # two Socket.IO clients: init/join/move/leave/error/reconnect
@@ -434,7 +447,8 @@ or page errors. `_tmp/` scripts are scratch tooling, gitignored and not required
 
 Manual test checklist:
 
-1. `npm run server`, `npm run dev`, open the landing page. Click **Create a room**, note the
+1. `npm run server`, `npm run dev`, open the landing page. Confirm **Create a room** and **Join
+   room** are disabled until you type a name or click **Random**. Click **Create a room**, note the
    code, then **Copy link** and open it in a second window: both cars should appear.
 2. Open a third window with a different code; it should not see either of the first two cars.
 3. Drive with WASD/arrows; hold Space while turning to drift; confirm skid marks.
@@ -450,6 +464,8 @@ Manual test checklist:
     color, and a window in a different room sees nothing.
 11. Click **Join** in both windows (allow microphone access): both show two voice participants and
     hear each other. Use **Mute** in one window, then **Leave**; the participant count updates.
+12. Open a share link in a fresh browser profile: the name prompt appears before the game connects.
+    Choose a name and confirm the car joins the room in the link.
 
 ---
 
@@ -475,8 +491,9 @@ Manual test checklist:
   a modified client can still teleport within the world or clip through buildings. Tag state,
   however, **is** server-authoritative: clients only receive `tag:hit` results and cannot
   claim tags or edit "it"/score fields.
-- There is **no authentication or persistent identity**: names, colors and IDs are generated
-  per connection. A page reload produces a new driver. Room codes are shareable links, not
+- There is **no authentication or persistent identity**: IDs are generated per connection, and a
+  driver name is chosen per visit (typed or generated by **Random**) but never stored. A page
+  reload asks for a name again and produces a new driver. Room codes are shareable links, not
   secrets — anyone with a code can join that room.
 - **Chat and voice are unmoderated and open to anyone in the room.** Chat text is validated for
   length and control characters and React escapes it on display; there are no channels, mentions

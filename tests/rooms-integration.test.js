@@ -118,6 +118,21 @@ test('health reports active rooms and total players', async () => {
   assert.ok(body.players >= 1)
 })
 
+test('a chosen handshake name is used and kept unique in the room', async () => {
+  const a = connect('NAMERZ', { name: 'Ada Racer' })
+  const b = connect('NAMERZ', { name: '  Ada   Racer  ' })
+  const c = connect('NAMERZ')
+  const [initA, initB, initC] = await Promise.all([
+    once(a, 'game:init'),
+    once(b, 'game:init'),
+    once(c, 'game:init'),
+  ])
+
+  assert.equal(initA.player.name, 'Ada Racer')
+  assert.equal(initB.player.name, 'Ada Racer 2')
+  assert.match(initC.player.name, /^[A-Za-z]+ [A-Za-z]+ \d{2}$/)
+})
+
 test('chat is room-scoped and attributed with server-owned identity', async () => {
   const a = connect('CHATAA', { carColor: '#f97316' })
   const b = connect('CHATAA')

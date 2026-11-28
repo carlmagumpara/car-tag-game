@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import CarGame from './features/car-game/CarGame.jsx'
+import NameField from './features/car-game/components/NameField.jsx'
+import NameGate from './features/car-game/components/NameGate.jsx'
 import { CAR_COLORS, loadCarColor, saveCarColor } from './features/car-game/game/car-colors.js'
+import { createRandomName, normalizePlayerName } from './features/car-game/game/player-name.js'
 import { createRoomId, normalizeRoomId } from './features/car-game/game/room-id.js'
 
 function parseRoute() {
@@ -60,17 +63,20 @@ function ColorPicker({ color, onSelect }) {
 
 function Landing({ onPlay, onJoin, carColor, onSelectColor }) {
   const [code, setCode] = useState('')
+  const [nameDraft, setNameDraft] = useState('')
   const [invalid, setInvalid] = useState(false)
+  const name = normalizePlayerName(nameDraft)
 
   const submit = (event) => {
     event.preventDefault()
+    if (!name) return
     const roomId = normalizeRoomId(code)
     if (!roomId) {
       setInvalid(true)
       return
     }
     setInvalid(false)
-    onJoin(roomId)
+    onJoin(roomId, name)
   }
 
   return (
@@ -103,11 +109,25 @@ function Landing({ onPlay, onJoin, carColor, onSelectColor }) {
           no download — just open the link and go.
         </p>
 
-        <div className="mt-9 flex flex-wrap items-center gap-4">
+        <div className="mt-8">
+          <NameField
+            value={nameDraft}
+            onChange={setNameDraft}
+            onRandom={() => setNameDraft(createRandomName())}
+          />
+          {!name && (
+            <p className="mt-2 font-mono text-[11px] text-amber-300">
+              Type a name or click Random before you join.
+            </p>
+          )}
+        </div>
+
+        <div className="mt-8 flex flex-wrap items-center gap-4">
           <button
             type="button"
-            onClick={onPlay}
-            className="rounded-xl bg-cyan-400 px-7 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:bg-cyan-300"
+            onClick={() => onPlay(name)}
+            disabled={!name}
+            className="rounded-xl bg-cyan-400 px-7 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Create a room →
           </button>
@@ -133,7 +153,8 @@ function Landing({ onPlay, onJoin, carColor, onSelectColor }) {
           />
           <button
             type="submit"
-            className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 font-mono text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
+            disabled={!name}
+            className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 font-mono text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Join room
           </button>
@@ -181,8 +202,14 @@ function Landing({ onPlay, onJoin, carColor, onSelectColor }) {
 export default function App() {
   const [route, setRoute] = useState(parseRoute)
   const [carColor, setCarColor] = useState(loadCarColor)
+  const [driverName, setDriverName] = useState(null)
 
   const selectCarColor = useCallback((value) => setCarColor(saveCarColor(value)), [])
+
+  // Returning home starts a new session, so the next room asks for a name again.
+  useEffect(() => {
+    if (route.view === 'landing') setDriverName(null)
+  }, [route.view])
 
   useEffect(() => {
     const onHashChange = () => setRoute(parseRoute())
@@ -204,12 +231,25 @@ export default function App() {
   }, [route.view, route.roomId, roomId])
 
   if (route.view === 'game') {
+    if (!driverName) {
+      return (
+        <NameGate
+          roomId={roomId}
+          onChoose={setDriverName}
+          onExit={() => {
+            window.location.hash = '/'
+          }}
+        />
+      )
+    }
     return (
       <CarGame
         key={roomId}
         roomId={roomId}
         carColor={carColor}
+        driverName={driverName}
         onExit={() => {
+          setDriverName(null)
           window.location.hash = '/'
         }}
       />
@@ -220,10 +260,12 @@ export default function App() {
     <Landing
       carColor={carColor}
       onSelectColor={selectCarColor}
-      onPlay={() => {
+      onPlay={(name) => {
+        setDriverName(name)
         window.location.hash = `/game/${createRoomId()}`
       }}
-      onJoin={(code) => {
+      onJoin={(code, name) => {
+        setDriverName(name)
         window.location.hash = `/game/${code}`
       }}
     />

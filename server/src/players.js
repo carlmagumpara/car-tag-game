@@ -1,6 +1,28 @@
 const ADJECTIVES = ['Neon', 'Swift', 'Midnight', 'Turbo', 'Cloudy', 'Electric', 'Golden', 'Quiet', 'Cosmic']
 const NOUNS = ['Driver', 'Comet', 'Falcon', 'Voyager', 'Racer', 'Panda', 'Nova', 'Cruise', 'Kite']
 
+// Duplicated from src/features/car-game/game/player-name.js so this server can
+// run on its own. Keep the limit and normalization rules in sync.
+export const PLAYER_NAME_MAX_LENGTH = 24
+
+export function normalizePlayerName(value) {
+  if (typeof value !== 'string') return null
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(value)) return null
+  const name = value.trim().replace(/\s+/g, ' ').slice(0, PLAYER_NAME_MAX_LENGTH)
+  return name || null
+}
+
+// A driver may bring their own name, but names stay unique within the room.
+function uniqueName(base, taken) {
+  if (!taken.includes(base)) return base
+  for (let index = 2; index < 100; index += 1) {
+    const candidate = `${base} ${index}`.slice(0, PLAYER_NAME_MAX_LENGTH)
+    if (!taken.includes(candidate)) return candidate
+  }
+  return generatePlayerName(taken)
+}
+
 // Duplicated from src/features/car-game/game/car-colors.js so this server can be
 // deployed on its own. Keep the palette in sync.
 export const CAR_COLORS = Object.freeze([
@@ -71,13 +93,15 @@ export class PlayerStore {
     return this.players.size
   }
 
-  add(id, requestedColor = null) {
+  add(id, requestedColor = null, requestedName = null) {
     const taken = Array.from(this.players.values(), (player) => player.name)
     const index = this.players.size
     const spawn = spawnFor(index)
+    const chosen = normalizePlayerName(requestedName)
+    const name = chosen ? uniqueName(chosen, taken) : generatePlayerName(taken)
     const player = {
       id,
-      name: generatePlayerName(taken),
+      name,
       color: normalizeCarColor(requestedColor, CAR_COLORS[index % CAR_COLORS.length].hex),
       x: spawn.x,
       y: spawn.y,
