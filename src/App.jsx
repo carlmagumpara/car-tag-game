@@ -172,6 +172,7 @@ function Landing({ onPlay, onJoin, carColor, onSelectColor }) {
 
       <footer className="relative mx-auto max-w-6xl border-t border-white/10 px-6 py-8 font-mono text-xs text-slate-600">
         Built with React, Canvas and Socket.IO. The multiplayer server runs separately from this site.
+        <span className="mt-1 block text-slate-500">Made by carlmagumpara.</span>
       </footer>
     </main>
   )
