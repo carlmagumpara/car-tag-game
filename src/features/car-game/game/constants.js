@@ -38,6 +38,11 @@ export const NETWORK = Object.freeze({
 // Interior px/s maps to a readable "km/h" display value.
 export const SPEED_DISPLAY_FACTOR = 0.32
 
+// Grace period after a tag: nobody can be tagged while it is active. Mirrors
+// server/src/config.js TAG_COOLDOWN_MS default; multiplayer reads the actual
+// value from game:init so a server override wins there.
+export const TAG_COOLDOWN_MS = 5000
+
 export const CAR_COLORS = Object.freeze([
   '#38bdf8',
   '#f472b6',

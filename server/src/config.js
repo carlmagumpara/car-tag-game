@@ -21,7 +21,7 @@ export const config = Object.freeze({
   // overrides this with '/api/game'. Standalone servers use the default.
   socketPath: process.env.SOCKET_IO_PATH || '/socket.io',
   tagRadius: Math.min(Math.max(Number(process.env.TAG_RADIUS) || 38, 20), 80),
-  tagCooldownMs: Math.min(Math.max(Number(process.env.TAG_COOLDOWN_MS) || 1200, 200), 10000),
+  tagCooldownMs: Math.min(Math.max(Number(process.env.TAG_COOLDOWN_MS) || 5000, 200), 10000),
   // Duration of a scoring round in seconds. The timer only runs while the
   // round is active; it starts once at least two drivers are ready.
   roundSeconds: Math.min(Math.max(Number(process.env.ROUND_SECONDS) || 60, 5), 3600),

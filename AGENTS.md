@@ -23,7 +23,8 @@ and the driver with the most tags when the timer expires wins.
 - The server **validates and clamps** client-reported movement and broadcasts room-scoped
   snapshots at 20 Hz. Remote cars are rendered 100 ms in the past and interpolated.
 - **Tag state and round state are server-owned.** Clients never decide who is "it", who scored,
-  or who won, and cannot claim a tag themselves.
+  or who won, and cannot claim a tag themselves. Every tag starts a 5-second immunity window in
+  both modes; the HUD counts it down while no tag can land.
 - Each room has **ephemeral text chat** and optional **open-mic voice**. Chat is validated and
   broadcast by the server; voice is a browser-to-browser WebRTC mesh where the server only
   validates and relays signaling (SDP offers/answers and ICE candidates).
@@ -87,6 +88,7 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │       │   ├── useKeyboard.js     key state in a ref; blur/visibility cleanup
 │       │   ├── useMultiplayer.js  socket lifecycle, roster, reconnect, chat, send helpers
 │       │   ├── useAiGame.js       local AI match: rival stepping, scoring, restart
+│       │   ├── useTagCooldown.js  HUD countdown for the 5s post-tag immunity
 │       │   └── useVoice.js        WebRTC mesh: mic, peers, signaling, cleanup
 │       └── game/                  PURE, DOM-light logic (unit-tested directly by Node)
 │           ├── ai.js              AI steering: chase/flee, obstacle probing, smoothing
@@ -142,6 +144,7 @@ Four pairs of values are duplicated. Change both sides together and add/update a
 | `src/features/car-game/game/car-colors.js` (`CAR_COLORS`) | `server/src/players.js` (`CAR_COLORS`) | exact hex values and ids |
 | `src/features/car-game/game/world.js` (`getSpawnPoints`) | `server/src/players.js` (`spawnFor`) | spawn positions on the central road |
 | `src/features/car-game/game/chat.js` (`CHAT_MAX_LENGTH`) | `server/src/chat.js` (`CHAT_MAX_LENGTH`) | 240-character chat limit |
+| `src/features/car-game/game/constants.js` (`TAG_COOLDOWN_MS`) | `server/src/config.js` (`tagCooldownMs`) | 5 s immunity after a tag; multiplayer overrides via `game:init` |
 | `src/features/car-game/game/player-name.js` (`PLAYER_NAME_MAX_LENGTH`) | `server/src/players.js` (same export) | 24-character single-line names |
 
 Network timing is mirrored too: `NETWORK.sendIntervalMs = 50`, `NETWORK.serverTickMs = 50`,

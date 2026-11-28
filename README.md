@@ -98,6 +98,7 @@ src/
     hooks/useKeyboard.js               key state in a ref, blur/visibility cleanup
     hooks/useMultiplayer.js            socket lifecycle, roster, reconnection, chat
     hooks/useAiGame.js                 local AI match state, rival stepping, scoring
+    hooks/useTagCooldown.js            HUD countdown for the 5s post-tag immunity
     hooks/useVoice.js                  WebRTC mesh: mic, peers, signaling, cleanup
     game/ai.js                         pure AI steering: chase, flee, obstacle avoidance
     game/ai-match.js                   pure local tag/round rules (mirrors server)
@@ -150,6 +151,10 @@ _tmp/                                  scratch verification scripts (gitignored)
   `server/src/players.js` (24 characters, single line) for the same reason. Voice signaling limits
   live in `server/src/voice.js`; the server relays only to drivers who opted in and are in the
   same room.
+- The 5-second tag immunity is defined once on the server (`TAG_COOLDOWN_MS`, default 5000) and
+  mirrored by `game/constants.js` (`TAG_COOLDOWN_MS`) for the AI mode. Multiplayer clients read
+  the server's value from `game:init` (`config.tag.cooldownMs`), so a configured override wins
+  over the mirrored default in the HUD countdown.
 - Voice uses a public STUN server by default. Override it with `VITE_VOICE_STUN_URL` (a public
   value, not a secret). Without TURN, drivers behind symmetric NAT may not connect.
 - The dusk city is drawn once into an offscreen canvas at startup (textured asphalt,
@@ -236,7 +241,7 @@ Backend (`server/.env`):
 | `MAX_PLAYERS` | `40` | Concurrent player cap per room (clamped to 2–200). |
 | `MAX_ROOMS` | `200` | Simultaneous room cap (clamped to 1–1000); existing rooms can always be joined. |
 | `TAG_RADIUS` | `38` | Contact distance in world pixels for a valid tag (clamped to 20–80). |
-| `TAG_COOLDOWN_MS` | `1200` | Grace period after a tag before another tag can occur. |
+| `TAG_COOLDOWN_MS` | `5000` | Immunity after a tag: nobody can be tagged for 5 seconds (clamped 200–10000 ms). |
 | `ROUND_SECONDS` | `60` | Length of a scoring round in seconds (clamped to 5–3600). |
 
 `.env.example` files in both folders list every variable with placeholders. `.env*` files
@@ -357,7 +362,9 @@ If you cannot hear another driver, you may be behind a network that needs a TURN
 **Tag rules:** the driver with the flaming orange outline is "it". Drive into another car to
 tag them — the role and a "Tagged!" flash transfer to them. The HUD shows who is "it" and how
 many tags you have; the driver list marks the tagger with `IT`. Contact is resolved on the
-server, so bumping is enough — there is no separate tag button.
+server, so bumping is enough — there is no separate tag button. After every tag there is a
+**5-second immunity window** ("Stay away · no tags for 5s" in the HUD) during which nobody can
+tag anyone, giving the newly tagged driver room to escape. The same rule applies in You vs AI.
 
 **Round rules:** press `READY` in the HUD (or `Ready for next round` on the winner screen) to
 indicate you want to play. The timer starts only when there are at least two drivers
@@ -495,7 +502,8 @@ Manual test checklist:
 2. Open a third window with a different code; it should not see either of the first two cars.
 3. Drive with WASD/arrows; hold Space while turning to drift; confirm skid marks.
 4. Drive to a world edge and into a building; confirm the car is blocked.
-5. Drive the tagged car into the other one; confirm "it", the flash and the tag count transfer.
+5. Drive the tagged car into the other one; confirm "it", the flash and the tag count transfer,
+   and that the "Stay away" countdown blocks tags for 5 seconds afterwards.
 6. Close one window; the other should show the player leaving (and "it" reassigned if needed).
 7. Click `READY` on one client: the timer stays paused. Click `READY` on the other: the countdown
    begins and scores reset. Check the winner screen when time runs out.

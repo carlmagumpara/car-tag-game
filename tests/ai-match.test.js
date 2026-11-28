@@ -27,6 +27,10 @@ const readyPair = (match, players, now = 1000) => {
   return setAiReady(match, players, players[1].id, true, now)
 }
 
+test('local matches use the same five-second tag immunity as multiplayer', () => {
+  assert.equal(AI_MATCH.tagCooldownMs, 5000)
+})
+
 test('a new match waits for both drivers to ready up', () => {
   const match = createAiMatch(1000)
   const players = [driver('you'), driver('ai')]

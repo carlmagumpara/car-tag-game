@@ -21,6 +21,7 @@ export default function GameHUD({
   isIt,
   itName,
   tags,
+  immunitySeconds = 0,
   game,
   ready,
   roomId,
@@ -95,6 +96,14 @@ export default function GameHUD({
         </span>
         <span className="text-slate-400">tags {tags}</span>
       </div>
+
+      {immunitySeconds > 0 && (
+        <div className="pointer-events-auto rounded-lg border border-emerald-400/40 bg-emerald-950/70 px-3 py-1.5 font-mono text-[11px] backdrop-blur-md">
+          <span className="font-semibold text-emerald-200">
+            Stay away · no tags for {immunitySeconds}s
+          </span>
+        </div>
+      )}
 
       <div
         className={`pointer-events-auto flex items-center justify-between gap-3 rounded-lg border px-3 py-1.5 font-mono text-[11px] backdrop-blur-md ${

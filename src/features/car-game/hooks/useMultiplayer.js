@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
+import { TAG_COOLDOWN_MS } from '../game/constants.js'
 import { createInterpolationBuffer, pruneBuffer, pushSnapshot } from '../game/interpolation.js'
 
 const DEFAULT_TRANSPORTS = ['websocket', 'polling']
@@ -29,6 +30,7 @@ export function useMultiplayer({
   const [playerCount, setPlayerCount] = useState(0)
   const [tagEvent, setTagEvent] = useState(null)
   const [game, setGame] = useState(null)
+  const [tagCooldownMs, setTagCooldownMs] = useState(TAG_COOLDOWN_MS)
   const [chat, setChat] = useState([])
   const [socketEpoch, setSocketEpoch] = useState(0)
   const [attempt, setAttempt] = useState(0)
@@ -40,6 +42,7 @@ export function useMultiplayer({
       setSelf(null)
       setTagEvent(null)
       setGame(null)
+      setTagCooldownMs(TAG_COOLDOWN_MS)
       setChat([])
       return undefined
     }
@@ -94,6 +97,11 @@ export function useMultiplayer({
 
     const onInit = (data) => {
       if (disposed || !data?.player) return
+      // The server owns the grace period; a configured override must win over
+      // the client's mirrored default when the HUD shows the countdown.
+      if (Number.isFinite(data.config?.tag?.cooldownMs)) {
+        setTagCooldownMs(data.config.tag.cooldownMs)
+      }
       if (data.roomId) setActiveRoomId(data.roomId)
       selfIdRef.current = data.player.id
       setSelf(data.player)
@@ -201,6 +209,7 @@ export function useMultiplayer({
       setPlayerCount(0)
       setTagEvent(null)
       setGame(null)
+      setTagCooldownMs(TAG_COOLDOWN_MS)
       setChat([])
       selfIdRef.current = null
       playersRef.current.clear()
@@ -310,6 +319,7 @@ export function useMultiplayer({
     reconnect,
     tagEvent,
     game,
+    tagCooldownMs,
     chat,
     sendChat,
     sendReady,

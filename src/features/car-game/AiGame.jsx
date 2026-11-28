@@ -4,8 +4,10 @@ import AiHUD from './components/AiHUD.jsx'
 import GameControls from './components/GameControls.jsx'
 import PlayerList from './components/PlayerList.jsx'
 import TouchControls from './components/TouchControls.jsx'
+import { AI_MATCH } from './game/ai-match.js'
 import { useAiGame } from './hooks/useAiGame.js'
 import { useKeyboard } from './hooks/useKeyboard.js'
+import { useTagCooldown } from './hooks/useTagCooldown.js'
 
 function Overlay({ icon, title, message, actionLabel, onAction, secondaryLabel, onSecondary }) {
   return (
@@ -62,6 +64,7 @@ export default function AiGame({ onExit, carColor, driverName }) {
   const itName = roster.find((player) => player.isIt)?.name || 'Nobody'
   const tags = self?.tags || 0
   const ready = Boolean(self?.ready)
+  const immunitySeconds = useTagCooldown(tagEvent, AI_MATCH.tagCooldownMs)
   const controlsEnabled = Boolean(self) && !paused && !roundOver
   const { inputRef, clear } = useKeyboard({ enabled: controlsEnabled })
 
@@ -117,6 +120,7 @@ export default function AiGame({ onExit, carColor, driverName }) {
               isIt={isIt}
               itName={itName}
               tags={tags}
+              immunitySeconds={immunitySeconds}
               game={game}
               ready={ready}
               onToggleReady={() => sendReady(!ready)}

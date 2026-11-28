@@ -2,11 +2,13 @@
 // server/src/tag.js and server/src/round.js so both modes play the same game,
 // but this module is local-only: no socket, no server state, no network events.
 
+import { TAG_COOLDOWN_MS } from './constants.js'
+
 export const AI_MATCH = Object.freeze({
   roundSeconds: 60, // matches server config.ROUND_SECONDS default
   minPlayers: 2, // matches server MIN_PLAYERS
   tagRadius: 38, // matches server config.TAG_RADIUS default
-  tagCooldownMs: 1200, // matches server config.TAG_COOLDOWN_MS default
+  tagCooldownMs: TAG_COOLDOWN_MS, // 5s of immunity after every tag, like multiplayer
 })
 
 export function createAiMatch(now = 0, roundSeconds = AI_MATCH.roundSeconds) {

@@ -11,7 +11,7 @@ import {
 
 const player = (id, x, y) => ({ id, x, y, isIt: false, tags: 0 })
 const RADIUS = 38
-const COOLDOWN = 1200
+const COOLDOWN = 5000
 
 test('first driver becomes it automatically', () => {
   const state = createTagState()
@@ -59,6 +59,21 @@ test('the cooldown prevents an immediate tag-back', () => {
   applyTag(first, [a, b], state, 5000, COOLDOWN)
   assert.equal(evaluateTag([a, b], state, 5100, RADIUS, COOLDOWN), null)
   assert.ok(evaluateTag([a, b], state, 5000 + COOLDOWN + 1, RADIUS, COOLDOWN))
+})
+
+test('immunity lasts the full five seconds after a tag', () => {
+  const state = createTagState()
+  const a = player('a', 100, 100)
+  const b = player('b', 110, 100)
+  ensureIt([a, b], state, 1000, COOLDOWN)
+  state.cooldownUntil = 0
+  const hit = evaluateTag([a, b], state, 5000, RADIUS, COOLDOWN)
+  applyTag(hit, [a, b], state, 5000, COOLDOWN)
+
+  for (const at of [5000, 6000, 9000, 9999]) {
+    assert.equal(evaluateTag([a, b], state, at, RADIUS, COOLDOWN), null)
+  }
+  assert.ok(evaluateTag([a, b], state, 10000, RADIUS, COOLDOWN))
 })
 
 test('leaving driver hands it to another player', () => {

@@ -10,6 +10,7 @@ import { getSocketConfig } from './game/socket-config.js'
 import { roomUrl } from './game/room-id.js'
 import { useKeyboard } from './hooks/useKeyboard.js'
 import { useMultiplayer } from './hooks/useMultiplayer.js'
+import { useTagCooldown } from './hooks/useTagCooldown.js'
 import { useVoice } from './hooks/useVoice.js'
 
 const socketConfig = getSocketConfig()
@@ -68,6 +69,7 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
     reconnect,
     tagEvent,
     game,
+    tagCooldownMs,
     chat,
     sendChat,
     sendReady,
@@ -98,6 +100,7 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
   const winnerIds = game?.winnerIds || []
   const winners = (game?.standings || []).filter((entry) => winnerIds.includes(entry.id))
   const winnerNames = winners.map((entry) => entry.name).join(' & ')
+  const immunitySeconds = useTagCooldown(tagEvent, tagCooldownMs)
   const controlsEnabled = Boolean(self) && status === 'connected' && !paused && !roundOver
   const { inputRef, clear } = useKeyboard({ enabled: controlsEnabled })
 
@@ -180,6 +183,7 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
           isIt={isIt}
           itName={itName}
           tags={tags}
+          immunitySeconds={immunitySeconds}
           game={game}
           ready={ready}
           roomId={shareRoomId}
