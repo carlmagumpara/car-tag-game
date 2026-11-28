@@ -58,7 +58,12 @@ export function canAiDrive(match) {
 export function armAiCountdown(match, players, now) {
   if (players.length < AI_MATCH.minPlayers) return false
   if (match.phase === 'playing' || match.phase === 'countdown') return false
-  if (match.phase === 'finished' && now < match.finishedAt + match.resultHoldMs) return false
+  if (match.phase === 'finished') {
+    // Mirror the server: the results hold is not a green light to auto-start.
+    // The human's READY (mirrored by the rival) must still be pending.
+    if (now < match.finishedAt + match.resultHoldMs) return false
+    if (!players.some((player) => player.ready)) return false
+  }
   match.phase = 'countdown'
   match.nextRoundAt = now + match.countdownMs
   match.endsAt = 0

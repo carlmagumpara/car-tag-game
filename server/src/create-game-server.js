@@ -342,8 +342,9 @@ export function createGameServer({ socketPath = config.socketPath, healthPath = 
       const now = Date.now()
       const before = room.round.phase
       maybeFinishRound(players, room.round, now, room.tagState.itId)
-      // The results screen holds briefly, then the countdown advances on the
-      // server clock rather than on client readiness.
+      // The results screen holds briefly. armCountdown only proceeds once a
+      // driver has confirmed with READY, so the clock never starts a rematch
+      // on its own.
       if (
         room.round.phase === 'finished' &&
         now >= room.round.finishedAt + config.resultHoldMs

@@ -120,7 +120,7 @@ export default function GameHUD({
             : phase === 'countdown'
               ? `Next round in ${secondsLeft}s`
               : phase === 'finished'
-                ? 'Round over — next round starting'
+                ? 'Round over — press READY for next'
                 : playerCount < minPlayers
                   ? `Need ${minPlayers} drivers to start`
                   : `Ready ${readyCount}/${playerCount}`}

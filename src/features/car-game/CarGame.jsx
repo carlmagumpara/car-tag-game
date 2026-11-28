@@ -321,9 +321,9 @@ export default function CarGame({ onExit, roomId, carColor, driverName }) {
             }. ${
               ready
                 ? 'Waiting for the other drivers.'
-                : 'The next round starts automatically.'
+                : 'Press READY when you want the next round to start.'
             }`}
-            actionLabel={ready ? 'Cancel ready' : 'Ready now'}
+            actionLabel={ready ? 'Cancel ready' : 'Ready for next round'}
             onAction={() => sendReady(!ready)}
             secondaryLabel="Exit to home"
             onSecondary={onExit}

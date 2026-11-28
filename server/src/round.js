@@ -1,7 +1,8 @@
 // Pure round rules. The server owns the phase, timer, loser and standings;
 // clients only receive the resulting state. A room needs at least MIN_PLAYERS
-// drivers. Once that many are connected, a short countdown leads into the
-// round automatically; readiness can cancel or re-arm that countdown.
+// drivers. Once that many are connected, a short countdown leads into the first
+// round automatically; readiness can cancel or re-arm it. Later rounds wait for
+// an explicit READY after the results hold.
 
 export const MIN_PLAYERS = 2
 
@@ -74,8 +75,13 @@ export function resetRound(players, round) {
 export function armCountdown(round, players, now) {
   if (players.length < MIN_PLAYERS) return false
   if (round.phase === 'playing' || round.phase === 'countdown') return false
-  // Keep the results screen visible long enough to read who lost.
-  if (round.phase === 'finished' && now < round.finishedAt + round.resultHoldMs) return false
+  if (round.phase === 'finished') {
+    // Keep the results screen visible long enough to read who lost.
+    if (now < round.finishedAt + round.resultHoldMs) return false
+    // A rematch is never automatic: a driver must explicitly confirm it. A
+    // READY pressed during the hold is honored here once the hold expires.
+    if (!players.some((player) => player.ready)) return false
+  }
   round.phase = 'countdown'
   round.nextRoundAt = now + round.countdownMs
   round.endsAt = 0

@@ -38,11 +38,12 @@ mode in the mode picker:
 ### 2. Start a round
 
 - **Multiplayer:** click **Create a room** and share the code or **Copy link** from the HUD. Once
-  two drivers are connected, a 3-second countdown starts the 90-second round automatically.
-  **READY**/cancel is optional and stops or re-arms the countdown. Newcomers may join mid-round.
+  two drivers are connected, a 3-second countdown starts the first 90-second round automatically.
+  After that, a driver must press **READY** to confirm the next round; READY/cancel also stops or
+  re-arms a running countdown. Newcomers may join mid-round.
 - **You vs AI:** click **Play vs AI**, then click **READY** in the HUD. The rival stays parked until
   you ready up, then readies up with you, a 3-second countdown runs, and the 90-second round starts.
-  Cancelling READY parks it again.
+  Cancelling READY parks it again, and every rematch needs another READY.
 
 ### 3. Drive
 
@@ -73,9 +74,9 @@ others once the global cooldown closes. Tags only score while the round timer is
 ### 5. Win and play again
 
 When the 90-second timer runs out, the driver who is **it** loses and everyone else wins; the
-end screen shows the loser and the tag standings. The results hold briefly, then a 3-second
-countdown starts the next round automatically in multiplayer. In You vs AI, click **Play again**
-on the result screen to reset both cars for a rematch.
+end screen shows the loser and the tag standings. The results hold briefly, but the next round
+never starts on its own: a driver presses **READY** to confirm it, then a 3-second countdown runs.
+The same button on the You vs AI result screen starts the rematch; both cars reset when it begins.
 
 ### 6. Multiplayer extras
 
@@ -116,10 +117,11 @@ are deleted so their codes can be reused. A bare `/#/game` URL gets a freshly ge
   immunity and a per-pair contact latch prevent duplicate or false tags. Clients cannot claim a
   tag themselves.
 - Round state is **server-owned** too: once two drivers are connected, a 3-second countdown
-  starts the 90-second round; `player:ready:false` cancels it and `true` re-arms it. The driver
-  holding "it" at zero loses. Scores reset at the start of each round and tags only count while
-  the timer is running; `game:state` broadcasts the phase, seconds left, next-round time, ready
-  drivers, loser and final standings.
+  starts the first 90-second round; `player:ready:false` cancels it and `true` re-arms it. Later
+  rounds only arm after a driver explicitly sends `player:ready:true`, so results are never
+  skipped. The driver holding "it" at zero loses. Scores reset at the start of each round and
+  tags only count while the timer is running; `game:state` broadcasts the phase, seconds left,
+  next-round time, ready drivers, loser and final standings.
 - The city is generated from a **fixed seed** (`game/world.js`), so every client and the
   server calculate the same roads, houses, shops, playgrounds, hospital and spawn points
   without sending map data.
@@ -334,7 +336,7 @@ receives the live round, tag and shield state in `game:init`.
 | --- | --- | --- | --- |
 | `game:init` | server → client | `{ id, roomId, player: Player, players: Player[], config: { maxPlayers, tickMs, world, tag, countdownMs, roundSeconds, minPlayers }, round }` | Sent immediately after joining the room. `players` are the other drivers **in that room**; `tag` is `{ radius, cooldownMs, immunityMs }`; `round` is the live `game:state` payload. |
 | `player:joined` | server → others | `Player` | A new car entered the city. |
-| `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; `false` cancels the pre-round countdown, `true` re-arms it. Ignored while the timer is running. |
+| `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; `false` cancels the pre-round countdown, `true` re-arms it or confirms the next round after results. Ignored while the timer is running. |
 | `game:state` | server → room | `{ phase, roundSeconds, secondsLeft, endsAt, nextRoundAt, countdownMs, minPlayers, readyIds, winnerIds, loserId, standings }` | Sent on phase transitions/joins/readiness/leaves and once per countdown second. `phase` is `waiting`, `countdown`, `playing` or `finished`. |
 | `player:move` | client → server | `{ x: number, y: number, angle: number, speed: number }` | At most 20 Hz; validated, clamped and rate limited. |
 | `player:moved` | server → room | `{ players: Player[] }` | One 20 Hz broadcast per room, not one per client message. |
@@ -415,7 +417,7 @@ starts as "it", chases your car (leading your movement) and flees once you tag i
 nearby buildings and the world edge before steering, handbrake-drifts through sharp turns and
 reverses briefly if it gets stuck. Both drivers share the same spawn road, physics and contact
 rules. Press `READY` to arm the 3-second countdown into the 90-second round; the result screen
-shows the tag counts and the loser, and **Play again** resets both cars for a rematch. Chat and voice are multiplayer-only — a local
+shows the tag counts and the loser, and its **READY** button starts the next round. Chat and voice are multiplayer-only — a local
 match has no room, no connection and no other human drivers.
 
 **Car color:** pick a swatch under **Pick your car color** on the landing page before creating or
@@ -442,13 +444,14 @@ tagged driver gets a **2-second shield** (teal ring and "Shield · immune for Ns
 during which they cannot be tagged, though they can still tag others after the global gate.
 The same rules apply in You vs AI.
 
-**Round rules:** the 90-second round starts automatically after a 3-second countdown once at
-least two drivers are connected. Pressing `READY` is optional: `ready:false` cancels the
-countdown and `ready:true` re-arms it. Tags scored before the timer starts do not count. When
-time runs out, whoever is "it" loses; the results screen names them and lists the standings,
-then the next round arms automatically. If the room drops below two drivers while a round is
-running, the round is aborted and scores are cleared. New drivers may join mid-round and receive
-the live round, tag and shield state immediately.
+**Round rules:** the first 90-second round starts automatically after a 3-second countdown once
+at least two drivers are connected. Pressing `READY` is optional for that first round:
+`ready:false` cancels the countdown and `ready:true` re-arms it. Every later round needs a
+driver to press `READY` on the result screen or in the HUD; the results hold briefly and then a
+3-second countdown runs. Tags scored before the timer starts do not count. When time runs out,
+whoever is "it" loses; the results screen names them and lists the standings. If the room drops
+below two drivers while a round is running, the round is aborted and scores are cleared. New
+drivers may join mid-round and receive the live round, tag and shield state immediately.
 
 Game keys are only intercepted while the game is active; the landing page and normal
 portfolio navigation are unaffected. Touch buttons use pointer capture and release on
@@ -582,9 +585,10 @@ Manual test checklist:
    that a single bump cannot transfer it twice while the cars touch, and that the new tagger's
    teal shield counts down from 2 seconds.
 6. Close one window; the other should show the player leaving ("it" passes randomly if needed).
-7. With two drivers connected, a 3-second countdown starts the 90-second round automatically.
-   Press `READY` once to cancel, then again to re-arm. Wait for the time to expire and confirm
-   the results screen names the driver who was "it" as the loser.
+7. With two drivers connected, a 3-second countdown starts the first 90-second round
+   automatically. Press `READY` once to cancel, then again to re-arm. Wait for the time to expire
+   and confirm the results screen names the driver who was "it" as the loser. Wait past the
+   results hold and confirm the next round does not start until a driver clicks **READY**.
 8. Stop and restart the server; both clients should show "Connection lost", then reconnect into
    the same room with fresh state.
 9. Resize the window and test on a phone-sized viewport for touch controls.
@@ -600,8 +604,8 @@ Manual test checklist:
     list and starts as "it". Drive around and confirm it follows you, detours around buildings and
     tags you; check that the HUD score and tag toast update without a server connection.
 15. Wait for the timer to expire: the result overlay shows both scores and the loser (whoever was
-    "it"). Click **Play again** to return to a fresh waiting round, then exit to home and create a
-    multiplayer room to confirm the socket connection still works.
+    "it"). Confirm the rival stays parked until you click **READY** on the result screen, then exit
+    to home and create a multiplayer room to confirm the socket connection still works.
 
 ---
 

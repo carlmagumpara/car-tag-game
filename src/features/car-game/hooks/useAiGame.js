@@ -20,6 +20,7 @@ import { getDriveAxis } from '../game/input.js'
 import { createVehicle, stepVehicle } from '../game/physics.js'
 import { getSpawnPoints, world } from '../game/world.js'
 
+const PLAYER_ID = 'ai-player'
 const AI_ID = 'ai-rival'
 const AI_NAME = 'AI Rival'
 const AI_FALLBACK_COLOR = '#fb7185'
@@ -41,7 +42,6 @@ export function useAiGame({ carColor, driverName }) {
   const matchRef = useRef(null)
   const lastTickRef = useRef(0)
 
-  const [round, setRound] = useState(0)
   const [self, setSelf] = useState(null)
   const [roster, setRoster] = useState([])
   const [game, setGame] = useState(null)
@@ -85,7 +85,7 @@ export function useAiGame({ carColor, driverName }) {
     const spawns = getSpawnPoints(2)
     const color = pickAiColor(carColor)
     const player = {
-      id: `ai-player-${round}`,
+      id: PLAYER_ID,
       name: driverName || 'You',
       color: carColor,
       x: spawns[0].x,
@@ -127,7 +127,7 @@ export function useAiGame({ carColor, driverName }) {
     setTagEvent(null)
     syncUi()
     setGame(publicAiGame(match, [player, ai], now))
-  }, [round, carColor, driverName, syncUi])
+  }, [carColor, driverName, syncUi])
 
   // GameCanvas calls this at 20 Hz with the freshly simulated player state.
   // Reusing that hook point keeps the AI in the same clock as the player and
@@ -244,8 +244,6 @@ export function useAiGame({ carColor, driverName }) {
     setGame(publicAiGame(match, players, now))
   }, [syncUi])
 
-  const restart = useCallback(() => setRound((value) => value + 1), [])
-
   useEffect(() => {
     if (!tagEvent) return undefined
     const timer = setTimeout(() => setTagEvent(null), 2500)
@@ -260,6 +258,5 @@ export function useAiGame({ carColor, driverName }) {
     sendReady,
     tagEvent,
     game,
-    restart,
   }
 }

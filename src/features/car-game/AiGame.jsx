@@ -63,7 +63,7 @@ export default function AiGame({ onExit, carColor, driverName }) {
   const [muted, setMuted] = useState(false)
   const [hud, setHud] = useState({ speed: 0, drifting: false, x: 0, y: 0 })
 
-  const { self, roster, playersRef, sendMove, sendReady, tagEvent, game, restart } = useAiGame({
+  const { self, roster, playersRef, sendMove, sendReady, tagEvent, game } = useAiGame({
     carColor,
     driverName,
   })
@@ -211,9 +211,11 @@ export default function AiGame({ onExit, carColor, driverName }) {
               <Overlay
                 icon={youLost ? '💥' : '🏁'}
                 title={resultTitle}
-                message={`Time ran out with ${loserId === aiPlayer?.id ? aiPlayer?.name || 'AI Rival' : 'you'} holding the tag. You ${tags} · ${aiPlayer?.name || 'AI Rival'} ${aiPlayer?.tags || 0} tags.`}
-                actionLabel="Play again"
-                onAction={restart}
+                message={`Time ran out with ${loserId === aiPlayer?.id ? aiPlayer?.name || 'AI Rival' : 'you'} holding the tag. You ${tags} · ${aiPlayer?.name || 'AI Rival'} ${aiPlayer?.tags || 0} tags. ${
+                  ready ? 'The rival is ready too.' : 'Press READY when you want the next round.'
+                }`}
+                actionLabel={ready ? 'Cancel ready' : 'Ready for next round'}
+                onAction={() => sendReady(!ready)}
                 secondaryLabel="Exit to home"
                 onSecondary={onExit}
               />

@@ -297,3 +297,27 @@ test('a newcomer joins mid-round and receives the live round state', async () =>
   assert.equal(state.loserId, room.tagState.itId)
   assert.ok(!state.winnerIds.includes(state.loserId))
 })
+
+test('a finished round waits for READY instead of arming the next countdown', async () => {
+  const a = connect('WA2TAA')
+  const started = waitForPhase(a, 'playing', 8000)
+  const b = connect('WA2TAA')
+  await Promise.all([once(a, 'game:init', 8000), once(b, 'game:init', 8000)])
+  await started
+
+  const room = rooms.get('WA2TAA')
+  room.round.endsAt = Date.now() - 1
+  const finished = await waitForPhase(a, 'finished', 6000)
+  assert.equal(finished.phase, 'finished')
+
+  // Skip the results hold: the room must still not arm a countdown by itself.
+  room.round.finishedAt = Date.now() - 6000
+  await sleep(250)
+  const idle = rooms.get('WA2TAA').round
+  assert.equal(idle.phase, 'finished')
+  assert.equal(idle.nextRoundAt, 0)
+
+  const countdown = waitForPhase(a, 'countdown', 3000)
+  a.emit('player:ready', { ready: true })
+  assert.equal((await countdown).phase, 'countdown')
+})

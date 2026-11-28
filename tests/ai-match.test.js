@@ -174,6 +174,34 @@ test('whoever holds it at zero loses, regardless of tag counts', () => {
   assert.deepEqual(match.standings.map((entry) => entry.tags), [3, 1])
 })
 
+test('a finished local round waits for READY before the next one', () => {
+  const match = createAiMatch(1000)
+  const players = [driver('you'), driver('ai')]
+  assignAiIt(match, players, 'ai')
+  startRound(match, players, 1000)
+  maybeFinishAiRound(match, players, match.endsAt, 'ai')
+  const holdEnd = match.finishedAt + match.resultHoldMs
+
+  // No auto-countdown: without the human's confirmation the match stays done.
+  assert.equal(armAiCountdown(match, players, holdEnd), false)
+  assert.equal(armAiCountdown(match, players, holdEnd + 10000), false)
+  assert.equal(match.phase, 'finished')
+  assert.equal(match.nextRoundAt, 0)
+
+  // READY during the results hold is honored once the hold expires. The local
+  // hook mirrors the human's choice onto the rival, as it does in the UI.
+  setAiReady(match, players, 'you', true, match.finishedAt + 100)
+  setAiReady(match, players, 'ai', true, match.finishedAt + 100)
+  assert.equal(armAiCountdown(match, players, holdEnd), true)
+  assert.equal(match.phase, 'countdown')
+  assert.ok(players.every((player) => player.ready))
+  assert.equal(
+    maybeStartAiRound(match, players, holdEnd + match.countdownMs),
+    true,
+  )
+  assert.equal(match.phase, 'playing')
+})
+
 test('public game state matches the multiplayer payload shape', () => {
   const match = createAiMatch(1000, 60)
   const players = [driver('you'), driver('ai')]

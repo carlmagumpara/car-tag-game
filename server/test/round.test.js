@@ -135,6 +135,28 @@ test('a finished round arms its own countdown and resets scores on start', () =>
   assert.equal(round.loserId, null)
 })
 
+test('a finished round stays finished until a driver confirms the next one', () => {
+  const round = createRoundState(10)
+  const players = [driver('a'), driver('b')]
+  startRound(players, round, 0)
+  players[0].tags = 4
+  maybeFinishRound(players, round, 13000, 'b')
+
+  // The results hold must never arm a rematch on its own.
+  assert.equal(armCountdown(round, players, 16000), false)
+  assert.equal(round.phase, 'finished')
+  assert.equal(round.nextRoundAt, 0)
+
+  // A READY given during the hold is honored once the hold expires.
+  assert.equal(setPlayerReady(players, round, 'a', true, 14000).changed, true)
+  assert.equal(armCountdown(round, players, 15400), false)
+  assert.equal(armCountdown(round, players, 16000), true)
+  assert.equal(round.phase, 'countdown')
+  assert.equal(maybeStartRound(players, round, 19000), true)
+  assert.equal(round.phase, 'playing')
+  assert.ok(players.every((player) => player.tags === 0))
+})
+
 test('losing a driver aborts an active round and clears its scores', () => {
   const round = createRoundState(30)
   const players = [driver('a'), driver('b')]

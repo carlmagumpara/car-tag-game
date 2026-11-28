@@ -84,10 +84,10 @@ export default function AiHUD({
             : phase === 'countdown'
               ? `Next round in ${secondsLeft}s`
               : phase === 'finished'
-                ? 'Round over'
+                ? 'Round over — press READY for next'
                 : 'Ready to start the round'}
         </span>
-        {!playing && phase !== 'finished' && (
+        {!playing && (
           <button
             type="button"
             onClick={onToggleReady}
