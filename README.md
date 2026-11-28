@@ -2,8 +2,8 @@
 
 A standalone React + Vite + Tailwind CSS frontend and a separate Node.js/Express/Socket.IO
 server that lets visitors drive around the same stylized top-down city in real time and play
-**tag**: one driver is "it" and passes the role on by bumping into another car. Drivers ready up
-for a timed round (two drivers minimum); the one with the most tags when time runs out wins.
+**tag**: one randomly chosen driver is "it" and passes the role on by bumping into another car.
+Rounds last 90 seconds (two drivers minimum); whoever is "it" when time runs out loses.
 
 Every game lives in its **own room** with a random six-character code. Create a room, copy its
 link, and only drivers who join with that code see each other or share a scoreboard. Each room
@@ -37,11 +37,11 @@ mode in the mode picker:
 
 ### 2. Start a round
 
-- **Multiplayer:** click **Create a room**, share the code or **Copy link** from the HUD, and have
-  everyone click **READY**. The timer starts once at least two drivers are connected and every
-  driver is ready. A newcomer cannot join while a round is in progress.
+- **Multiplayer:** click **Create a room** and share the code or **Copy link** from the HUD. Once
+  two drivers are connected, a 3-second countdown starts the 90-second round automatically.
+  **READY**/cancel is optional and stops or re-arms the countdown. Newcomers may join mid-round.
 - **You vs AI:** click **Play vs AI**, then click **READY** in the HUD. The rival readies up with
-  you and the 60-second round starts immediately.
+  you, a 3-second countdown runs, and the 90-second round starts.
 
 ### 3. Drive
 
@@ -60,17 +60,18 @@ and your own car with `YOU`. See §5 for the full controls reference.
 
 ### 4. Play tag
 
-The driver with the flaming orange outline is **it**. Bump into another car to tag them: the role
-and a tag point transfer to the tagged driver. After every tag there is a **5-second immunity
-window** — the HUD shows "Stay away · no tags for Ns" and nobody can tag anyone until it expires.
-Tags only score while the round timer is running.
+The driver with the flaming orange outline and **IT** badge is **it**. Bump into another car to
+tag them: the role and a tag point transfer to the tagged driver. A global **1-second cooldown**
+prevents one collision from passing the tag twice, and the newly tagged driver gets a **2-second
+shield** (teal ring and HUD countdown) during which they cannot be tagged — but they can still tag
+others once the global cooldown closes. Tags only score while the round timer is running.
 
 ### 5. Win and play again
 
-When the timer runs out, the driver with the most tags wins; ties share the win, and a scoreless
-round has no winner. In multiplayer, click **Ready for next round** on the winner screen (everyone
-must ready up again). In You vs AI, click **Play again** on the result screen to reset both cars
-for a rematch.
+When the 90-second timer runs out, the driver who is **it** loses and everyone else wins; the
+end screen shows the loser and the tag standings. The results hold briefly, then a 3-second
+countdown starts the next round automatically in multiplayer. In You vs AI, click **Play again**
+on the result screen to reset both cars for a rematch.
 
 ### 6. Multiplayer extras
 
@@ -107,11 +108,14 @@ are deleted so their codes can be reused. A bare `/#/game` URL gets a freshly ge
   between snapshots to hide jitter.
 - Tag state is **server-owned**: during the same 20 Hz tick the server checks whether the
   current tagger is within contact range of another car, transfers "it", tracks tag counts and
-  emits `tag:hit`. Clients cannot claim a tag themselves.
-- Round state is **server-owned** too: `player:ready` flags start the countdown only when at
-  least two drivers are connected and every driver is ready. Scores reset at the start of each
-  round and tags only count while the timer is running; `game:state` broadcasts the phase,
-  seconds left, ready drivers and the final standings.
+  emits `tag:hit` with the new shield expiry. A global 1-second gate, per-player 2-second
+  immunity and a per-pair contact latch prevent duplicate or false tags. Clients cannot claim a
+  tag themselves.
+- Round state is **server-owned** too: once two drivers are connected, a 3-second countdown
+  starts the 90-second round; `player:ready:false` cancels it and `true` re-arms it. The driver
+  holding "it" at zero loses. Scores reset at the start of each round and tags only count while
+  the timer is running; `game:state` broadcasts the phase, seconds left, next-round time, ready
+  drivers, loser and final standings.
 - The city is generated from a **fixed seed** (`game/world.js`), so every client and the
   server calculate the same roads, houses, shops, playgrounds, hospital and spawn points
   without sending map data.
@@ -156,7 +160,7 @@ src/
     hooks/useKeyboard.js               key state in a ref, blur/visibility cleanup
     hooks/useMultiplayer.js            socket lifecycle, roster, reconnection, chat
     hooks/useAiGame.js                 local AI match state, rival stepping, scoring
-    hooks/useTagCooldown.js            HUD countdown for the 5s post-tag immunity
+    hooks/useTagCooldown.js            HUD countdown for the 2s post-tag immunity
     hooks/useVoice.js                  WebRTC mesh: mic, peers, signaling, cleanup
     game/ai.js                         pure AI steering: chase, flee, obstacle avoidance
     game/ai-match.js                   pure local tag/round rules (mirrors server)
@@ -209,10 +213,11 @@ _tmp/                                  scratch verification scripts (gitignored)
   `server/src/players.js` (24 characters, single line) for the same reason. Voice signaling limits
   live in `server/src/voice.js`; the server relays only to drivers who opted in and are in the
   same room.
-- The 5-second tag immunity is defined once on the server (`TAG_COOLDOWN_MS`, default 5000) and
-  mirrored by `game/constants.js` (`TAG_COOLDOWN_MS`) for the AI mode. Multiplayer clients read
-  the server's value from `game:init` (`config.tag.cooldownMs`), so a configured override wins
-  over the mirrored default in the HUD countdown.
+- The 1-second global tag gate and 2-second per-player immunity are defined on the server
+  (`TAG_COOLDOWN_MS`, `IMMUNITY_MS`) and mirrored by `game/constants.js` for the AI mode.
+  Multiplayer clients read both from `game:init` (`config.tag.cooldownMs` and
+  `config.tag.immunityMs`), so configured overrides win. `tag:hit` carries the server's absolute
+  `immuneUntil`, which clients convert to their own clock for a synchronized shield countdown.
 - Voice uses a public STUN server by default. Override it with `VITE_VOICE_STUN_URL` (a public
   value, not a secret). Without TURN, drivers behind symmetric NAT may not connect.
 - The dusk city is drawn once into an offscreen canvas at startup (textured asphalt,
@@ -299,8 +304,11 @@ Backend (`server/.env`):
 | `MAX_PLAYERS` | `40` | Concurrent player cap per room (clamped to 2–200). |
 | `MAX_ROOMS` | `200` | Simultaneous room cap (clamped to 1–1000); existing rooms can always be joined. |
 | `TAG_RADIUS` | `38` | Contact distance in world pixels for a valid tag (clamped to 20–80). |
-| `TAG_COOLDOWN_MS` | `5000` | Immunity after a tag: nobody can be tagged for 5 seconds (clamped 200–10000 ms). |
-| `ROUND_SECONDS` | `60` | Length of a scoring round in seconds (clamped to 5–3600). |
+| `TAG_COOLDOWN_MS` | `1000` | Global gate between tag transfers in ms (clamped 200–10000). |
+| `IMMUNITY_MS` | `2000` | Shield on the newly tagged driver in ms (clamped 200–10000). |
+| `ROUND_SECONDS` | `90` | Length of a scoring round in seconds (clamped to 5–3600). |
+| `RESULT_HOLD_MS` | `2500` | How long the round-end results screen stays up (clamped 500–10000 ms). |
+| `COUNTDOWN_MS` | `3000` | Pre-round countdown before the next round starts (clamped 500–10000 ms). |
 
 `.env.example` files in both folders list every variable with placeholders. `.env*` files
 are gitignored except the examples.
@@ -315,21 +323,20 @@ A client requests a room through `auth: { roomId, carColor, name }` (or
 if needed, joins the socket and only then sends `game:init`. A missing/invalid code creates a
 fresh room whose id is returned in `game:init`. `name` is normalized (24 characters, one line),
 and duplicate names in a room get a numeric suffix; an absent or invalid name falls back to a
-generated one so raw clients still work. A socket arriving while the room's round is `playing`
-is refused with `GAME_IN_PROGRESS` and disconnected; waiting rooms and finished rooms can still
-be joined.
+generated one so raw clients still work. A socket may join in any phase, including mid-round; it
+receives the live round, tag and shield state in `game:init`.
 
 | Event | Direction | Payload | Notes |
 | --- | --- | --- | --- |
-| `game:init` | server → client | `{ id, roomId, player: Player, players: Player[], config: { maxPlayers, tickMs, world, tag, roundSeconds, minPlayers } }` | Sent immediately after joining the room. `players` are the other drivers **in that room**; `tag` is `{ radius, cooldownMs }`. |
+| `game:init` | server → client | `{ id, roomId, player: Player, players: Player[], config: { maxPlayers, tickMs, world, tag, countdownMs, roundSeconds, minPlayers }, round }` | Sent immediately after joining the room. `players` are the other drivers **in that room**; `tag` is `{ radius, cooldownMs, immunityMs }`; `round` is the live `game:state` payload. |
 | `player:joined` | server → others | `Player` | A new car entered the city. |
-| `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; `false` cancels readiness. Ignored while the timer is running. |
-| `game:state` | server → room | `{ phase, roundSeconds, secondsLeft, endsAt, minPlayers, readyIds, winnerIds, standings }` | Sent on phase transitions/joins/readiness/leaves and once per countdown second. |
+| `player:ready` | client → server | `{ ready?: boolean }` | Defaults to `true`; `false` cancels the pre-round countdown, `true` re-arms it. Ignored while the timer is running. |
+| `game:state` | server → room | `{ phase, roundSeconds, secondsLeft, endsAt, nextRoundAt, countdownMs, minPlayers, readyIds, winnerIds, loserId, standings }` | Sent on phase transitions/joins/readiness/leaves and once per countdown second. `phase` is `waiting`, `countdown`, `playing` or `finished`. |
 | `player:move` | client → server | `{ x: number, y: number, angle: number, speed: number }` | At most 20 Hz; validated, clamped and rate limited. |
 | `player:moved` | server → room | `{ players: Player[] }` | One 20 Hz broadcast per room, not one per client message. |
 | `player:left` | server → room | `{ id: string }` | Sent on disconnect to the room the driver was in. |
-| `tag:hit` | server → room | `{ taggerId, taggedId, itId, reason, at, players: [{ id, isIt, tags }] }` | `reason` is `tag` for contact, `reassign` for the first/leaving tagger. Drives HUD toasts and flash effects. |
-| `game:error` | server → client | `{ code: string, message: string }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (dropped silently), `INVALID_CHAT` (bad message), `SERVER_FULL` (room full), `ROOM_UNAVAILABLE` (room cap reached), `GAME_IN_PROGRESS` (round running). |
+| `tag:hit` | server → room | `{ taggerId, taggedId, itId, reason, at, immunityMs, immuneUntil, players: [{ id, isIt, tags, immuneUntil }] }` | `reason` is `tag` for contact, `reassign` for the random initial/leaving tagger. Drives toasts, flashes and shield countdowns. |
+| `game:error` | server → client | `{ code: string, message: string }` | `INVALID_PAYLOAD`, `INVALID_NUMBER`, `RATE_LIMITED` (dropped silently), `INVALID_CHAT` (bad message), `SERVER_FULL` (room full), `ROOM_UNAVAILABLE` (room cap reached). |
 | `chat:send` | client → server | `{ text: string }` | 1–240 chars, single line; rate-limited to 3/s with a 400 ms gap. |
 | `chat:message` | server → room | `{ id, playerId, name, color, text, at }` | Identity and timestamp are server-owned; no history is kept. |
 | `voice:state` | client → server | `{ enabled: boolean, muted: boolean }` | Opt in/out of voice. Only enabled drivers appear in `voice:peers`. |
@@ -350,19 +357,23 @@ be joined.
   "speed": 0,
   "isIt": false,
   "tags": 2,
-  "ready": false
+  "ready": false,
+  "immuneUntil": 0
 }
 ```
 
 - `angle` is normalized to `[-π, π]`; `speed` is signed forward velocity in px/s.
 - `isIt` marks the current tagger; `tags` counts successful tags; `ready` is the driver's
-  readiness for the next round. All three are server-owned.
-- `phase` is `waiting`, `playing` or `finished`; `secondsLeft` is a whole number of seconds and
-  `standings` is `[{ id, name, tags }]` sorted best-first. Ties are listed in `winnerIds`; a
-  round with zero tags has no winners.
-- The first driver becomes "it" automatically. If the tagger leaves, "it" passes to another
-  driver; a 1.2 s cooldown (configurable) prevents instant tag-backs. Each new round resets
-  scores and reassigns "it".
+  readiness; `immuneUntil` is a server epoch timestamp while the shield is active. All four are
+  server-owned.
+- `phase` is `waiting`, `countdown`, `playing` or `finished`; `secondsLeft` is a whole number of
+  seconds (the pre-round countdown while `phase === 'countdown'`) and `standings` is
+  `[{ id, name, tags }]` sorted best-first. `loserId` is the driver holding "it" at zero;
+  `winnerIds` lists everyone else.
+- The initial tagger is chosen randomly when a round starts. If the tagger leaves, "it" passes to
+  a random remaining driver. A 1 s global gate plus a 2 s per-player shield and a contact latch
+  allow exactly one transfer per collision. Each new round clears shields, resets scores and
+  chooses a new tagger.
 - Movement packets over ~25/s or faster than 40 ms apart are dropped per socket.
 - Five malformed packets (not rate-limited drops) disconnect that socket.
 - A full room emits `game:error` with `SERVER_FULL` and closes the connection. If the room cap is
@@ -398,8 +409,8 @@ Multiplayer keeps the create/join flow above. You vs AI starts a local match at 
 starts as "it", chases your car (leading your movement) and flees once you tag it. It probes
 nearby buildings and the world edge before steering, handbrake-drifts through sharp turns and
 reverses briefly if it gets stuck. Both drivers share the same spawn road, physics and contact
-rules. Press `READY` to start the 60-second round; the result screen shows the tag counts and
-**Play again** resets both cars for a rematch. Chat and voice are multiplayer-only — a local
+rules. Press `READY` to arm the 3-second countdown into the 90-second round; the result screen
+shows the tag counts and the loser, and **Play again** resets both cars for a rematch. Chat and voice are multiplayer-only — a local
 match has no room, no connection and no other human drivers.
 
 **Car color:** pick a swatch under **Pick your car color** on the landing page before creating or
@@ -417,20 +428,22 @@ your microphone without leaving the call, and **Leave** releases it. Audio goes 
 browsers over WebRTC; the game server only passes connection offers, answers and ICE candidates.
 If you cannot hear another driver, you may be behind a network that needs a TURN server.
 
-**Tag rules:** the driver with the flaming orange outline is "it". Drive into another car to
-tag them — the role and a "Tagged!" flash transfer to them. The HUD shows who is "it" and how
-many tags you have; the driver list marks the tagger with `IT`. Contact is resolved on the
-server, so bumping is enough — there is no separate tag button. After every tag there is a
-**5-second immunity window** ("Stay away · no tags for 5s" in the HUD) during which nobody can
-tag anyone, giving the newly tagged driver room to escape. The same rule applies in You vs AI.
+**Tag rules:** the driver with the flaming orange outline and the **IT** badge is "it". Drive
+into another car to tag them — the role and a "Tagged!" flash transfer to them. The HUD shows
+who is "it" and how many tags you have; the driver list marks the tagger with `IT`. Contact is
+resolved on the server, so bumping is enough — there is no separate tag button. A **1-second
+global gate** and a per-pair contact latch ensure one bump transfers the tag once. The newly
+tagged driver gets a **2-second shield** (teal ring and "Shield · immune for Ns" in the HUD)
+during which they cannot be tagged, though they can still tag others after the global gate.
+The same rules apply in You vs AI.
 
-**Round rules:** press `READY` in the HUD (or `Ready for next round` on the winner screen) to
-indicate you want to play. The timer starts only when there are at least two drivers
-and **every** connected driver is ready. Tags scored before the timer starts do not count. When
-time runs out the driver with the most tags wins; ties share the win, and a scoreless round has
-no winner. Press ready again to start another round. If the room drops below two drivers while a
-round is running, the round is aborted and scores are cleared. New drivers cannot join a room
-while its round is running; they must wait for the round to finish (or use a different code).
+**Round rules:** the 90-second round starts automatically after a 3-second countdown once at
+least two drivers are connected. Pressing `READY` is optional: `ready:false` cancels the
+countdown and `ready:true` re-arms it. Tags scored before the timer starts do not count. When
+time runs out, whoever is "it" loses; the results screen names them and lists the standings,
+then the next round arms automatically. If the room drops below two drivers while a round is
+running, the round is aborted and scores are cleared. New drivers may join mid-round and receive
+the live round, tag and shield state immediately.
 
 Game keys are only intercepted while the game is active; the landing page and normal
 portfolio navigation are unaffected. Touch buttons use pointer capture and release on
@@ -458,7 +471,7 @@ function in the same project as the static site. `vercel.json` selects the Vite 
    | `VITE_GAME_TRANSPORTS` | `websocket` | Vercel only upgrades WebSockets, not long-polling |
    | `VITE_GAME_SERVER_URL` | *(empty)* | Empty = same deployment origin; or set `https://<project>.vercel.app` |
    | `CLIENT_ORIGINS` | `https://<project>.vercel.app` | Server-side CORS allowlist; add custom domains too |
-   | `MAX_PLAYERS`, `MAX_ROOMS`, `TAG_RADIUS`, `TAG_COOLDOWN_MS`, `ROUND_SECONDS` | *(optional)* | Same tuning as standalone |
+   | `MAX_PLAYERS`, `MAX_ROOMS`, `TAG_RADIUS`, `TAG_COOLDOWN_MS`, `IMMUNITY_MS`, `ROUND_SECONDS`, `RESULT_HOLD_MS`, `COUNTDOWN_MS` | *(optional)* | Same tuning as standalone |
 
    `VITE_*` values are public build-time settings; `CLIENT_ORIGINS` is server-only.
 4. Deploy. Open `https://<project>.vercel.app/#/game` in two windows to test.
@@ -520,7 +533,7 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 | Players with the same code cannot see each other | They may be on different function instances; add Redis/pub-sub for shared room state. |
 | "Copy link" gives the wrong room | The code comes from the server's `game:init`; check the HUD shows the same code as the URL. |
 | Room cap reached | Raise `MAX_ROOMS` or wait for empty rooms to expire; existing codes still work. |
-| "A round is already in progress" | The room's timer is running. Wait for it to finish, then press **Try again**; joining mid-round is blocked. |
+| "A round is already in progress" | No longer returned: drivers can join mid-round and receive the live timer, tagger and shields. |
 | Server restarts / players drop | Expected: state is in memory; clients reconnect automatically into a fresh room with the same code. |
 
 ---
@@ -530,7 +543,7 @@ fall back to `localhost` in production. The Node server is **not** hosted on Git
 Automated (all executed during implementation):
 
 ```bash
-npm run test:all           # 67 frontend + 43 server tests (AI steering/match, rooms, tag, round, chat, voice, names, join gate) — all passed
+npm run test:all           # 70 frontend + 47 server tests (AI steering/match, rooms, tag, round, chat, voice, names, mid-round joins, simultaneous tags) — all passed
 npm run build              # production build — passed
 npm run server             # then: curl http://localhost:3001/health
 node _tmp/ai-mode-check.mjs        # browser: mode picker, full AI round + restart, multiplayer regression
@@ -561,10 +574,12 @@ Manual test checklist:
 3. Drive with WASD/arrows; hold Space while turning to drift; confirm skid marks.
 4. Drive to a world edge and into a building; confirm the car is blocked.
 5. Drive the tagged car into the other one; confirm "it", the flash and the tag count transfer,
-   and that the "Stay away" countdown blocks tags for 5 seconds afterwards.
-6. Close one window; the other should show the player leaving (and "it" reassigned if needed).
-7. Click `READY` on one client: the timer stays paused. Click `READY` on the other: the countdown
-   begins and scores reset. Check the winner screen when time runs out.
+   that a single bump cannot transfer it twice while the cars touch, and that the new tagger's
+   teal shield counts down from 2 seconds.
+6. Close one window; the other should show the player leaving ("it" passes randomly if needed).
+7. With two drivers connected, a 3-second countdown starts the 90-second round automatically.
+   Press `READY` once to cancel, then again to re-arm. Wait for the time to expire and confirm
+   the results screen names the driver who was "it" as the loser.
 8. Stop and restart the server; both clients should show "Connection lost", then reconnect into
    the same room with fresh state.
 9. Resize the window and test on a phone-sized viewport for touch controls.
@@ -574,14 +589,14 @@ Manual test checklist:
     hear each other. Use **Mute** in one window, then **Leave**; the participant count updates.
 12. Open a share link in a fresh browser profile: the name prompt appears before the game connects.
     Choose a name and confirm the car joins the room in the link.
-13. Start a round, then open the same link in a third window: it is refused with "A round is already
-    in progress". When the round ends, the same link connects normally.
+13. Start a round, then open the same link in a third window: it joins mid-round and immediately
+    shows the live timer, tagger and shields.
 14. Pick **You vs AI** on the landing page and start a local match: the rival appears in the driver
     list and starts as "it". Drive around and confirm it follows you, detours around buildings and
     tags you; check that the HUD score and tag toast update without a server connection.
-15. Wait for the timer to expire: the result overlay shows both scores and a winner. Click **Play
-    again** to return to a fresh waiting round, then exit to home and create a multiplayer room to
-    confirm the socket connection still works.
+15. Wait for the timer to expire: the result overlay shows both scores and the loser (whoever was
+    "it"). Click **Play again** to return to a fresh waiting round, then exit to home and create a
+    multiplayer room to confirm the socket connection still works.
 
 ---
 
@@ -636,7 +651,7 @@ Manual test checklist:
   unfairly; authoritative physics would close that gap.
 - In-memory state means a server restart clears every room, its tags and all players. On a
   multi-instance host (e.g. Vercel), rooms are also isolated per function instance. Because a
-  reconnect is a new join, a driver who drops mid-round cannot re-enter until that round ends.
+  reconnect is a new join, so a driver who drops mid-round rejoins as a fresh player.
 - Rooms are open to anyone with the code: there is no password or host control. Chat is ephemeral
   (no history, no delete or moderation) and there is no persistent scoreboard — tag counts reset
   each round and on disconnect.

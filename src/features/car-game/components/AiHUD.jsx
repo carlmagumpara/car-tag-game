@@ -22,7 +22,7 @@ export default function AiHUD({
 }) {
   const phase = game?.phase || 'waiting'
   const playing = phase === 'playing'
-  const secondsLeft = game?.secondsLeft ?? game?.roundSeconds ?? 60
+  const secondsLeft = game?.secondsLeft ?? game?.roundSeconds ?? 90
 
   return (
     <div className="pointer-events-none absolute left-3 top-3 z-20 flex w-[220px] flex-col gap-2 sm:left-4 sm:top-4">
@@ -64,7 +64,7 @@ export default function AiHUD({
       {immunitySeconds > 0 && (
         <div className="pointer-events-auto rounded-lg border border-emerald-400/40 bg-emerald-950/70 px-3 py-1.5 font-mono text-[11px] backdrop-blur-md">
           <span className="font-semibold text-emerald-200">
-            Stay away · no tags for {immunitySeconds}s
+            Shield · immune for {immunitySeconds}s
           </span>
         </div>
       )}
@@ -79,9 +79,11 @@ export default function AiHUD({
         <span className="font-semibold">
           {playing
             ? `Round · ${formatTime(secondsLeft)} left`
-            : phase === 'finished'
-              ? 'Round over'
-              : 'Ready to start the round'}
+            : phase === 'countdown'
+              ? `Next round in ${secondsLeft}s`
+              : phase === 'finished'
+                ? 'Round over'
+                : 'Ready to start the round'}
         </span>
         {!playing && phase !== 'finished' && (
           <button

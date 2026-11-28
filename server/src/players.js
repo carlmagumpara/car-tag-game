@@ -78,6 +78,9 @@ export function publicPlayer(player) {
     isIt: player.isIt,
     tags: player.tags,
     ready: Boolean(player.ready),
+    // Server epoch ms while the shield is active. Clients convert it to their
+    // own clock once so the countdown stays synced despite clock skew.
+    immuneUntil: player.immuneUntil || 0,
   }
 }
 
@@ -110,6 +113,7 @@ export class PlayerStore {
       isIt: false,
       tags: 0,
       ready: false,
+      immuneUntil: 0,
     }
     this.players.set(id, player)
     return player

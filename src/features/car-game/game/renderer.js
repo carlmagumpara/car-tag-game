@@ -692,7 +692,7 @@ function drawHeadlights(ctx, car) {
   ctx.restore()
 }
 
-function drawCar(ctx, car, isSelf = false) {
+function drawCar(ctx, car, isSelf = false, now = 0) {
   drawHeadlights(ctx, car)
 
   ctx.save()
@@ -711,6 +711,25 @@ function drawCar(ctx, car, isSelf = false) {
     ctx.beginPath()
     ctx.arc(0, 0, 46, 0, Math.PI * 2)
     ctx.fill()
+  }
+
+  // Temporary immunity: a dashed teal shield ring. The expiry is a local
+  // performance.now() timestamp, so it fades at the same time on every client.
+  if (car.immuneUntil > now) {
+    ctx.save()
+    ctx.globalAlpha = 0.14
+    ctx.fillStyle = '#2dd4bf'
+    ctx.beginPath()
+    ctx.arc(0, 0, 34, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.globalAlpha = 0.8
+    ctx.strokeStyle = '#5eead4'
+    ctx.lineWidth = 2
+    ctx.setLineDash([5, 4])
+    ctx.beginPath()
+    ctx.arc(0, 0, 34, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
   }
 
   const steer = (car.steer || 0) * 0.42
@@ -895,14 +914,28 @@ function drawCar(ctx, car, isSelf = false) {
     ctx.restore()
   }
 
-  const label = `${car.isIt ? '★ ' : ''}${car.name}${isSelf ? ' (you)' : ''}`
+  // Prominent arcade badge above the tagger, independent of the car's rotation.
+  if (car.isIt) {
+    ctx.save()
+    ctx.fillStyle = '#fb923c'
+    roundedRect(ctx, car.x - 13, car.y - 57, 26, 16, 5)
+    ctx.fill()
+    ctx.fillStyle = '#0b1120'
+    ctx.font = '700 10px ui-monospace, monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText('IT', car.x, car.y - 45)
+    ctx.restore()
+  }
+
+  const shieldSeconds = car.immuneUntil > now ? Math.ceil((car.immuneUntil - now) / 1000) : 0
+  const label = `${car.isIt ? '★ ' : ''}${car.name}${shieldSeconds > 0 ? ` · SHIELD ${shieldSeconds}s` : ''}${isSelf ? ' (you)' : ''}`
   ctx.font = '600 12px ui-monospace, monospace'
   ctx.textAlign = 'center'
   const width = ctx.measureText(label).width + 18
   ctx.fillStyle = 'rgba(2, 6, 23, 0.78)'
   roundedRect(ctx, car.x - width / 2, car.y - 36, width, 19, 6)
   ctx.fill()
-  ctx.fillStyle = car.isIt ? '#fca5a5' : isSelf ? '#ffffff' : car.color
+  ctx.fillStyle = car.isIt ? '#fca5a5' : shieldSeconds > 0 ? '#5eead4' : isSelf ? '#ffffff' : car.color
   ctx.beginPath()
   ctx.arc(car.x - width / 2 + 9, car.y - 26.5, 2.5, 0, Math.PI * 2)
   ctx.fill()
@@ -910,7 +943,7 @@ function drawCar(ctx, car, isSelf = false) {
 }
 
 // The caller has already applied DPR scaling and ctx.translate(-camera.x, -camera.y).
-export function renderScene(ctx, { cityCanvas, world, camera, viewWidth, viewHeight, local, remotes, skids, particles }) {
+export function renderScene(ctx, { cityCanvas, world, camera, viewWidth, viewHeight, local, remotes, skids, particles, now = 0 }) {
   const bounds = {
     left: camera.x - 40,
     top: camera.y - 40,
@@ -930,7 +963,7 @@ export function renderScene(ctx, { cityCanvas, world, camera, viewWidth, viewHei
 
   for (const remote of remotes) {
     if (remote.x < bounds.left - 30 || remote.x > bounds.right + 30 || remote.y < bounds.top - 40 || remote.y > bounds.bottom + 40) continue
-    drawCar(ctx, remote, false)
+    drawCar(ctx, remote, false, now)
   }
-  if (local) drawCar(ctx, local, true)
+  if (local) drawCar(ctx, local, true, now)
 }

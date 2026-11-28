@@ -38,10 +38,13 @@ export const NETWORK = Object.freeze({
 // Interior px/s maps to a readable "km/h" display value.
 export const SPEED_DISPLAY_FACTOR = 0.32
 
-// Grace period after a tag: nobody can be tagged while it is active. Mirrors
-// server/src/config.js TAG_COOLDOWN_MS default; multiplayer reads the actual
-// value from game:init so a server override wins there.
-export const TAG_COOLDOWN_MS = 5000
+// Global gate between tag transfers. Mirrors server/src/config.js; multiplayer
+// reads the server's override from game:init.
+export const TAG_COOLDOWN_MS = 1000
+
+// Per-player shield given to a newly tagged driver. Mirrors IMMUNITY_MS on the
+// server; the tagged player can still tag others once the global gate closes.
+export const IMMUNITY_MS = 2000
 
 export const CAR_COLORS = Object.freeze([
   '#38bdf8',
