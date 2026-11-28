@@ -140,14 +140,14 @@ test('health reports active rooms and total players', async () => {
 })
 
 test('a chosen handshake name is used and kept unique in the room', async () => {
+  // Join sequentially: the server suffixes duplicate names in connect order,
+  // so concurrent joins would make the expected suffix nondeterministic.
   const a = connect('NAMERZ', { name: 'Ada Racer' })
+  const initA = await once(a, 'game:init')
   const b = connect('NAMERZ', { name: '  Ada   Racer  ' })
+  const initB = await once(b, 'game:init')
   const c = connect('NAMERZ')
-  const [initA, initB, initC] = await Promise.all([
-    once(a, 'game:init'),
-    once(b, 'game:init'),
-    once(c, 'game:init'),
-  ])
+  const initC = await once(c, 'game:init')
 
   assert.equal(initA.player.name, 'Ada Racer')
   assert.equal(initB.player.name, 'Ada Racer 2')

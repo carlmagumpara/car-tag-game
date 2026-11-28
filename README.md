@@ -23,6 +23,64 @@ second player or game server, and it never opens a Socket.IO connection.
 
 ---
 
+## How to play
+
+### 1. Choose a mode
+
+On the landing page, type a driver name (or click **Random**) and pick a car color. Then select a
+mode in the mode picker:
+
+- **Multiplayer** — create a private room or join one with a six-character code. Needs the game
+  server running (see §2).
+- **You vs AI** — a local match against a computer rival on the same city. No server, room code
+  or second player required; open `/#/ai` to jump straight in.
+
+### 2. Start a round
+
+- **Multiplayer:** click **Create a room**, share the code or **Copy link** from the HUD, and have
+  everyone click **READY**. The timer starts once at least two drivers are connected and every
+  driver is ready. A newcomer cannot join while a round is in progress.
+- **You vs AI:** click **Play vs AI**, then click **READY** in the HUD. The rival readies up with
+  you and the 60-second round starts immediately.
+
+### 3. Drive
+
+| Action | Desktop | Mobile |
+| --- | --- | --- |
+| Accelerate | `W` / `↑` | GAS |
+| Reverse | `S` / `↓` | REV |
+| Steer | `A` / `D` or `←` / `→` | ◀ / ▶ |
+| Handbrake drift | `Space` | DRIFT |
+| Pause / resume | `Esc` or Pause button | Pause button |
+| Exit | Exit button | Exit button |
+
+The HUD shows your speed ("km/h" is a display scale, not a real speed), your position, who is
+"it" and your tag count. The driver list marks the tagger with `IT`, ready drivers with `RDY`
+and your own car with `YOU`. See §5 for the full controls reference.
+
+### 4. Play tag
+
+The driver with the flaming orange outline is **it**. Bump into another car to tag them: the role
+and a tag point transfer to the tagged driver. After every tag there is a **5-second immunity
+window** — the HUD shows "Stay away · no tags for Ns" and nobody can tag anyone until it expires.
+Tags only score while the round timer is running.
+
+### 5. Win and play again
+
+When the timer runs out, the driver with the most tags wins; ties share the win, and a scoreless
+round has no winner. In multiplayer, click **Ready for next round** on the winner screen (everyone
+must ready up again). In You vs AI, click **Play again** on the result screen to reset both cars
+for a rematch.
+
+### 6. Multiplayer extras
+
+Room chat is in the lower-right panel: type a message and press Enter or **Send**. Messages are
+ephemeral and only drivers in your room see them. Below chat, **Join** in the voice panel opens
+your mic (HTTPS or localhost required); **Mute** toggles it, **Leave** releases it. Voice is a
+direct browser-to-browser WebRTC mesh — the server never handles audio.
+
+---
+
 ## 1. Architecture and data flow
 
 ```
