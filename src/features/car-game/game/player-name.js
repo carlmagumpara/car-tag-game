@@ -2,6 +2,7 @@
 // a name sent in the handshake without importing browser code. Keep in sync.
 
 export const PLAYER_NAME_MAX_LENGTH = 24
+export const PLAYER_NAME_STORAGE_KEY = 'neon-drive:player-name'
 
 const ADJECTIVES = ['Neon', 'Swift', 'Midnight', 'Turbo', 'Cloudy', 'Electric', 'Golden', 'Quiet', 'Cosmic']
 const NOUNS = ['Driver', 'Comet', 'Falcon', 'Voyager', 'Racer', 'Panda', 'Nova', 'Cruise', 'Kite']
@@ -24,4 +25,28 @@ export function normalizePlayerName(value) {
   if (/[\u0000-\u001f\u007f]/.test(value)) return null
   const name = value.trim().replace(/\s+/g, ' ').slice(0, PLAYER_NAME_MAX_LENGTH)
   return name || null
+}
+
+// Remember the driver's chosen name on this browser, like the car color.
+// localStorage is unavailable in Node tests and can be disabled in browsers,
+// so both helpers fall back to an in-memory session choice.
+export function loadPlayerName() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null
+    return normalizePlayerName(window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY))
+  } catch {
+    return null
+  }
+}
+
+export function savePlayerName(value) {
+  const name = normalizePlayerName(value)
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return name
+    if (name) window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name)
+    else window.localStorage.removeItem(PLAYER_NAME_STORAGE_KEY)
+  } catch {
+    // Private browsing or a full storage quota: the choice still applies this session.
+  }
+  return name
 }

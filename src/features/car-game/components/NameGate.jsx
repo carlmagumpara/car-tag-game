@@ -4,8 +4,8 @@ import { createRandomName, normalizePlayerName } from '../game/player-name.js'
 
 // Share links land straight in a room. Ask for a name before connecting so
 // every driver makes the same choice as visitors who use the landing page.
-export default function NameGate({ roomId, onChoose, onExit }) {
-  const [draft, setDraft] = useState('')
+export default function NameGate({ roomId, initialName, onChoose, onExit }) {
+  const [draft, setDraft] = useState(initialName || '')
   const name = normalizePlayerName(draft)
 
   return (

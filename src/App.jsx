@@ -3,7 +3,12 @@ import CarGame from './features/car-game/CarGame.jsx'
 import NameField from './features/car-game/components/NameField.jsx'
 import NameGate from './features/car-game/components/NameGate.jsx'
 import { CAR_COLORS, loadCarColor, saveCarColor } from './features/car-game/game/car-colors.js'
-import { createRandomName, normalizePlayerName } from './features/car-game/game/player-name.js'
+import {
+  createRandomName,
+  loadPlayerName,
+  normalizePlayerName,
+  savePlayerName,
+} from './features/car-game/game/player-name.js'
 import { createRoomId, normalizeRoomId } from './features/car-game/game/room-id.js'
 
 function parseRoute() {
@@ -61,9 +66,9 @@ function ColorPicker({ color, onSelect }) {
   )
 }
 
-function Landing({ onPlay, onJoin, carColor, onSelectColor }) {
+function Landing({ onPlay, onJoin, carColor, onSelectColor, initialName }) {
   const [code, setCode] = useState('')
-  const [nameDraft, setNameDraft] = useState('')
+  const [nameDraft, setNameDraft] = useState(initialName || '')
   const [invalid, setInvalid] = useState(false)
   const name = normalizePlayerName(nameDraft)
 
@@ -202,14 +207,12 @@ function Landing({ onPlay, onJoin, carColor, onSelectColor }) {
 export default function App() {
   const [route, setRoute] = useState(parseRoute)
   const [carColor, setCarColor] = useState(loadCarColor)
-  const [driverName, setDriverName] = useState(null)
+  const [driverName, setDriverName] = useState(loadPlayerName)
 
   const selectCarColor = useCallback((value) => setCarColor(saveCarColor(value)), [])
 
-  // Returning home starts a new session, so the next room asks for a name again.
-  useEffect(() => {
-    if (route.view === 'landing') setDriverName(null)
-  }, [route.view])
+  // Committing a name (create, join or entering a share link) saves it for next time.
+  const chooseName = useCallback((value) => setDriverName(savePlayerName(value)), [])
 
   useEffect(() => {
     const onHashChange = () => setRoute(parseRoute())
@@ -235,7 +238,8 @@ export default function App() {
       return (
         <NameGate
           roomId={roomId}
-          onChoose={setDriverName}
+          initialName={driverName}
+          onChoose={chooseName}
           onExit={() => {
             window.location.hash = '/'
           }}
@@ -249,7 +253,6 @@ export default function App() {
         carColor={carColor}
         driverName={driverName}
         onExit={() => {
-          setDriverName(null)
           window.location.hash = '/'
         }}
       />
@@ -260,12 +263,13 @@ export default function App() {
     <Landing
       carColor={carColor}
       onSelectColor={selectCarColor}
+      initialName={driverName}
       onPlay={(name) => {
-        setDriverName(name)
+        chooseName(name)
         window.location.hash = `/game/${createRoomId()}`
       }}
       onJoin={(code, name) => {
-        setDriverName(name)
+        chooseName(name)
         window.location.hash = `/game/${code}`
       }}
     />

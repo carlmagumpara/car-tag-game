@@ -84,7 +84,7 @@ car-game/                          git repo, branch `main`, ESM ("type": "module
 │       │   └── useVoice.js        WebRTC mesh: mic, peers, signaling, cleanup
 │       └── game/                  PURE, DOM-light logic (unit-tested directly by Node)
 │           ├── chat.js            client chat input normalization
-│           ├── player-name.js     random name + name normalization
+│           ├── player-name.js     random name, normalization, localStorage persistence
 │           ├── voice-config.js    build-time STUN configuration
 │           ├── constants.js       WORLD, PHYSICS, NETWORK, speed display factor, color hexes
 │           ├── world.js           seeded city generation, spawn points, clamping helpers
@@ -244,8 +244,8 @@ Useful scripts (from root unless noted):
 | Hot-path mutable data | `useRef` | `playersRef`, `inputRef`, `socketRef`, `selfIdRef`, `ctxRef`, `cameraRef`, `skidsRef`, `particlesRef` |
 | Latest callback without re-subscribing | refs updated in effects | `pausedRef`, `sendMoveRef`, `hudRef`, `tagFlashRef` |
 | URL / navigation | `window.location.hash` + `hashchange` listener | `#/game`, `#/game/<CODE>` |
-| Name choice | local draft in `Landing`/`NameGate`, committed in `App` | not persisted; cleared on returning home |
-| Persistent preference | `localStorage` via `loadCarColor`/`saveCarColor` | key `neon-drive:car-color` |
+| Name choice | local draft in `Landing`/`NameGate`, committed in `App` via `chooseName` | saved on commit; prefilled on later visits/share links |
+| Persistent preference | `localStorage` via `loadCarColor`/`saveCarColor` and `loadPlayerName`/`savePlayerName` | keys `neon-drive:car-color`, `neon-drive:player-name` |
 | Chat history | React `useState` in `useMultiplayer`, capped at 50 | `chat`, `sendChat`; low-frequency, safe for React |
 | WebRTC voice | refs in `useVoice`, no React state per frame | `localStreamRef`, `peersRef`, hidden `<audio>` elements |
 
@@ -308,7 +308,8 @@ normalized to `[-π, π]`; `speed` is signed px/s. IDs and names are server-gene
   `auth.name ?? query.name`, then normalizes the name and makes duplicates unique per room.
 - A name is chosen before connecting: on the landing page via `NameField` (type or **Random**),
   or on direct share links via `NameGate`. Create/Join stay disabled until a valid name exists.
-  The name is deliberately not persisted.
+  A saved name from `localStorage` is prefilled and used automatically on share links; no name is
+  prompted again until the stored choice is cleared.
 - Missing/invalid room code creates a fresh room whose id is returned in `game:init`.
 - A socket is refused with `GAME_IN_PROGRESS` and disconnected when `canJoinRound(room.round)` is
   false (phase `playing`). Joining a waiting or finished room remains allowed. The client keeps the
@@ -349,9 +350,10 @@ route — `/api/game/health` is **not** routed).
 
 **There is no authentication system.** Do not invent one without a design discussion.
 
-- No accounts, passwords, tokens, JWTs, sessions, cookies, or OAuth. No user identity persists
-  across page reloads. A driver name is chosen per visit and sent in the handshake; it is never
-  stored and duplicates are suffixed by the server.
+- No accounts, passwords, tokens, JWTs, sessions, cookies, or OAuth. There is no server-side user
+  identity: a driver name is chosen once, kept in browser `localStorage` as a convenience, and sent
+  in the handshake; duplicates are suffixed by the server. Socket IDs and all game state still reset
+  on every connection or reload.
 - A "player" is created per socket connection in `PlayerStore.add`: id = `socket.id`, name from
   the handshake (normalized, duplicates suffixed) or generated from adjective/noun/number lists,
   color from the handshake or a distinct default.
